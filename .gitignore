@@ -7,7 +7,7 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-run_*.js
+run_*
 
 # Diagnostic reports (https://nodejs.org/api/report.html)
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
@@ -151,6 +151,6 @@ cdk.out/
 
 # GAIIA Debug & Scratch
 debug_*.txt
-test_*.json
+test_*
 scratch/
 *.log
