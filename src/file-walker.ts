@@ -104,7 +104,7 @@ export function parseRefactoredContent(content: string): FileData[] {
     const filePath = fileBlocks[i].trim();
     const fileContent = fileBlocks[i + 1]?.trim() || "";
     if (filePath) {
-      console.error(`[GAIIA] Found refactored file: ${filePath} (${fileContent.length} bytes)`);
+      console.info(`[GAIIA] Found refactored file: ${filePath} (${fileContent.length} bytes)`);
       files.push({ path: filePath, content: fileContent });
     }
   }

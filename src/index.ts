@@ -6,6 +6,11 @@ import { walkDirectory, chunkFiles, parseRefactoredContent, writeFileData } from
 import { z } from "zod";
 import fs from "fs";
 
+// MCP uses stdout for JSON-RPC, so all logging must go to stderr.
+// We redirect console.info to console.error so we can use .info in code 
+// without breaking the protocol or giving the impression of an error.
+console.info = console.error;
+
 const server = new Server(
   {
     name: "GAIIA Logic Proxy",
@@ -140,7 +145,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           };
         }
 
-        console.error(`[GAIIA] Starting project ${mode} for: ${directory_path}`);
+        console.info(`[GAIIA] Starting project ${mode} for: ${directory_path}`);
         
         const files = walkDirectory(directory_path);
         if (files.length === 0) {
@@ -151,13 +156,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
 
         const chunks = chunkFiles(files);
-        console.error(`[GAIIA] Split project into ${chunks.length} chunks.`);
+        console.info(`[GAIIA] Split project into ${chunks.length} chunks.`);
 
         const chunkResults: string[] = [];
         const modifiedFiles: string[] = [];
 
         for (let i = 0; i < chunks.length; i++) {
-          console.error(`[GAIIA] Processing chunk ${i + 1}/${chunks.length} (${mode})...`);
+          console.info(`[GAIIA] Processing chunk ${i + 1}/${chunks.length} (${mode})...`);
           
           let chunkInput = chunks[i];
           if (mode === "refactor") {
@@ -170,7 +175,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           });
 
           fs.writeFileSync("debug_expert_response.txt", data.processTask);
-          console.error(`[GAIIA] Expert Response length: ${data.processTask.length}`);
+          console.info(`[GAIIA] Expert Response length: ${data.processTask.length}`);
           chunkResults.push(data.processTask);
 
           if (mode === "refactor") {
@@ -180,7 +185,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               const cleanContent = revisedCodeMatch[1].replace(/^```[a-z]*\n/i, "").replace(/\n```$/i, "");
               const refactoredFiles = parseRefactoredContent(cleanContent);
               for (const rf of refactoredFiles) {
-                console.error(`[GAIIA] Applying refactor to: ${rf.path}`);
+                console.info(`[GAIIA] Applying refactor to: ${rf.path}`);
                 writeFileData(directory_path, rf);
                 modifiedFiles.push(rf.path);
               }
@@ -189,7 +194,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
 
         if (mode === "audit") {
-            console.error(`[GAIIA] Synthesizing final audit report...`);
+            console.info(`[GAIIA] Synthesizing final audit report...`);
             const synthesisPrompt = `[EXPERT_AUDITS_FOR_SYNTHESIS]\n${chunkResults.join("\n\n--- Next Chunk Audit ---\n\n")}`;
             const finalData = await executeGraphQL(PROCESS_TASK_MUTATION, {
                 expertEmail: activeExpertEmail,
@@ -220,7 +225,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("GAIIA MCP Server running on stdio");
+  console.info("GAIIA MCP Server running on stdio");
 }
 
 main().catch((error) => {
