@@ -1,3 +1,4 @@
+import "./logger.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema, } from "@modelcontextprotocol/sdk/types.js";
@@ -5,11 +6,6 @@ import { executeGraphQL } from "./appsync-client.js";
 import { walkDirectory, chunkFiles, parseRefactoredContent, writeFileData } from "./file-walker.js";
 import { z } from "zod";
 import fs from "fs";
-
-// MCP uses stdout for JSON-RPC, so all logging must go to stderr.
-// We redirect console.info to console.error so we can use .info in code 
-// without breaking the protocol or giving the impression of an error.
-console.info = console.error;
 
 const server = new Server(
   {
@@ -146,6 +142,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
 
         console.info(`[GAIIA] Starting project ${mode} for: ${directory_path}`);
+        console.info(`[GAIIA] Scanning directory...`);
         
         const files = walkDirectory(directory_path);
         if (files.length === 0) {
@@ -166,7 +163,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           
           let chunkInput = chunks[i];
           if (mode === "refactor") {
-            chunkInput = `[REFACTOR_TASK]\nCRITICAL: You are in REFACTOR MODE. Perform a full repository-wide refactor of the following files according to the [EXPERT_MANIFEST].\n\nRULES:\n1. All updated code MUST be placed inside a single [REVISED_CODE] block.\n2. Each file must be preceded by '--- File: path ---' markers.\n3. Return the COMPLETE content of each modified file.\n\nFILES TO REFACTOR:\n${chunks[i]}`;
+            chunkInput = `[REFACTOR_TASK]
+CRITICAL: REFACTOR MODE ENABLED.
+You must perform a high-fidelity, production-grade refactor of the files below according to the [EXPERT_MANIFEST].
+
+RULES:
+1. All refactored code MUST be contained within a single [REVISED_CODE] section.
+2. Use '--- File: path ---' markers before EACH file.
+3. You MUST return the COMPLETE and FULL content of every file you modify. Partial code or truncation is strictly forbidden and will break the build.
+4. If a file does not need changes, you do not need to include it in the [REVISED_CODE] section.
+
+FILES TO REFACTOR:
+${chunks[i]}`;
           }
 
           const data = await executeGraphQL(PROCESS_TASK_MUTATION, {
@@ -179,10 +187,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           chunkResults.push(data.processTask);
 
           if (mode === "refactor") {
-            // Extract REVISED_CODE block - handle optional colon, whitespace, and markdown blocks
-            const revisedCodeMatch = data.processTask.match(/\[REVISED_CODE\]:?\s*?\n(?:```(?:[a-z]+)?\n)?([\s\S]*?)(?:\n```|$)/i);
-            if (revisedCodeMatch) {
-              const cleanContent = revisedCodeMatch[1].replace(/^```[a-z]*\n/i, "").replace(/\n```$/i, "");
+            // Extract everything after the first [REVISED_CODE] tag
+            const parts = data.processTask.split(/\[REVISED_CODE\]:?/i);
+            if (parts.length > 1) {
+              // Join all parts after the tag and remove any other subsequent tags (only at start of line to avoid accidental cuts)
+              const combinedContent = parts.slice(1).join("\n");
+              const cleanContent = combinedContent.split(/\n\[[A-Z0-9_]{3,}\]/)[0].trim();
               const refactoredFiles = parseRefactoredContent(cleanContent);
               for (const rf of refactoredFiles) {
                 console.info(`[GAIIA] Applying refactor to: ${rf.path}`);
@@ -191,6 +201,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               }
             }
           }
+          console.info(`[GAIIA] Completed chunk ${i + 1}/${chunks.length}.`);
         }
 
         if (mode === "audit") {

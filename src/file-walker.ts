@@ -52,10 +52,12 @@ export function walkDirectory(dir: string, baseDir: string = dir): FileData[] {
     }
   }
 
+  const totalBytes = files.reduce((acc, f) => acc + f.content.length, 0);
+  console.info(`[GAIIA] Walk complete. Found ${files.length} files (${(totalBytes / 1024).toFixed(2)} KB).`);
   return files;
 }
 
-export function chunkFiles(files: FileData[], limit: number = 40000): string[] {
+export function chunkFiles(files: FileData[], limit: number = 20000): string[] {
   const chunks: string[] = [];
   let currentChunk = "";
 
@@ -80,6 +82,7 @@ export function chunkFiles(files: FileData[], limit: number = 40000): string[] {
     chunks.push(currentChunk);
   }
 
+  console.info(`[GAIIA] Chunking complete. Created ${chunks.length} chunks for processing.`);
   return chunks;
 }
 
@@ -102,7 +105,16 @@ export function parseRefactoredContent(content: string): FileData[] {
   // split will return [textBeforeFirstMatch, match1, textBetween1And2, match2, ...]
   for (let i = 1; i < fileBlocks.length; i += 2) {
     const filePath = fileBlocks[i].trim();
-    const fileContent = fileBlocks[i + 1]?.trim() || "";
+    let fileContent = fileBlocks[i + 1]?.trim() || "";
+    
+    // Strip markdown code fences if present around the content
+    if (fileContent.startsWith("```")) {
+      // Remove opening fence (e.g., ```typescript)
+      fileContent = fileContent.replace(/^```[a-z]*\n?/i, "");
+      // Remove closing fence
+      fileContent = fileContent.replace(/\n?```$/i, "");
+    }
+
     if (filePath) {
       console.info(`[GAIIA] Found refactored file: ${filePath} (${fileContent.length} bytes)`);
       files.push({ path: filePath, content: fileContent });
