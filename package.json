@@ -1,0 +1,23 @@
+{
+  "name": "gaiia-mcp-server",
+  "version": "1.0.0",
+  "description": "GAIIA Logic Proxy - MCP Server for Expert-Led Code Transformation",
+  "main": "build/index.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "node build/index.js",
+    "login": "node build/auth.js login"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.1",
+    "@aws-sdk/client-cognito-identity-provider": "^3.554.0",
+    "node-fetch": "^3.3.2",
+    "dotenv": "^16.4.5",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.7",
+    "typescript": "^5.4.5"
+  }
+}
