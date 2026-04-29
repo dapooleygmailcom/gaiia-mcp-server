@@ -3,9 +3,10 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema, } from "@modelcontextprotocol/sdk/types.js";
 import { executeGraphQL } from "./appsync-client.js";
-import { walkDirectory, chunkFiles, parseRefactoredContent, writeFileData } from "./file-walker.js";
+import { walkDirectory, chunkFiles, parseRefactoredContent, writeFileData, getRepoContext } from "./file-walker.js";
 import { z } from "zod";
 import fs from "fs";
+import crypto from "crypto";
 
 const server = new Server(
   {
@@ -32,8 +33,20 @@ const LIST_EXPERTS_QUERY = `
 `;
 
 const PROCESS_TASK_MUTATION = `
-  mutation ProcessTask($expertEmail: String!, $codeContent: String!) {
-    processTask(expertEmail: $expertEmail, codeContent: $codeContent)
+  mutation ProcessTask($expertEmail: String!, $codeContent: String!, $auditId: String, $chunkIndex: Int, $repoName: String, $branch: String, $mode: String) {
+    processTask(expertEmail: $expertEmail, codeContent: $codeContent, auditId: $auditId, chunkIndex: $chunkIndex, repoName: $repoName, branch: $branch, mode: $mode)
+  }
+`;
+
+const SYNTHESIZE_AUDIT_MUTATION = `
+  mutation SynthesizeAudit($expertEmail: String!, $auditId: String!, $mode: String!, $repoName: String, $branch: String) {
+    synthesizeAudit(expertEmail: $expertEmail, auditId: $auditId, mode: $mode, repoName: $repoName, branch: $branch)
+  }
+`;
+
+const GET_AUDIT_RESULT_QUERY = `
+  query GetAuditResult($expertEmail: String!, $auditId: String!) {
+    getAuditResult(expertEmail: $expertEmail, auditId: $auditId)
   }
 `;
 
@@ -142,84 +155,87 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
 
         console.info(`[GAIIA] Starting project ${mode} for: ${directory_path}`);
-        console.info(`[GAIIA] Scanning directory...`);
+        const { repoName, branch } = getRepoContext(directory_path);
+        const auditId = crypto.randomUUID();
         
         const files = walkDirectory(directory_path);
         if (files.length === 0) {
-          return {
-            isError: true,
-            content: [{ type: "text", text: "No valid code files found in the specified directory." }],
-          };
+          return { isError: true, content: [{ type: "text", text: "No valid code files found." }] };
         }
 
         const chunks = chunkFiles(files);
-        console.info(`[GAIIA] Split project into ${chunks.length} chunks.`);
-
-        const chunkResults: string[] = [];
-        const modifiedFiles: string[] = [];
+        console.info(`[GAIIA] Split project into ${chunks.length} chunks. Audit ID: ${auditId}`);
 
         for (let i = 0; i < chunks.length; i++) {
-          console.info(`[GAIIA] Processing chunk ${i + 1}/${chunks.length} (${mode})...`);
+          console.info(`[GAIIA] Processing chunk ${i + 1}/${chunks.length}...`);
           
           let chunkInput = chunks[i];
           if (mode === "refactor") {
-            chunkInput = `[REFACTOR_TASK]
-CRITICAL: REFACTOR MODE ENABLED.
-You must perform a high-fidelity, production-grade refactor of the files below according to the [EXPERT_MANIFEST].
-
-RULES:
-1. All refactored code MUST be contained within a single [REVISED_CODE] section.
-2. Use '--- File: path ---' markers before EACH file.
-3. You MUST return the COMPLETE and FULL content of every file you modify. Partial code or truncation is strictly forbidden and will break the build.
-4. If a file does not need changes, you do not need to include it in the [REVISED_CODE] section.
-
-FILES TO REFACTOR:
-${chunks[i]}`;
+            chunkInput = `[REFACTOR_TASK]\nCRITICAL: REFACTOR MODE ENABLED.\n\nFILES TO REFACTOR:\n${chunks[i]}`;
           }
 
           const data = await executeGraphQL(PROCESS_TASK_MUTATION, {
             expertEmail: activeExpertEmail,
             codeContent: chunkInput,
+            auditId,
+            chunkIndex: i,
+            repoName,
+            branch,
+            mode
           });
 
-          fs.writeFileSync("debug_expert_response.txt", data.processTask);
-          console.info(`[GAIIA] Expert Response length: ${data.processTask.length}`);
-          chunkResults.push(data.processTask);
+          // [FAIL-FAST] Check if the chunk audit itself failed
+          const chunkResponse = data.processTask || "";
+          if (chunkResponse.includes("[STATUS]: Error") || chunkResponse.includes("## [ERROR_DETAILS]")) {
+            console.error(`[GAIIA] Critical failure in chunk ${i + 1}. Aborting audit.`);
+            return {
+              isError: true,
+              content: [{ type: "text", text: `### ❌ Audit Aborted\nChunk ${i + 1} failed with error:\n\n${chunkResponse}` }],
+            };
+          }
+        }
 
-          if (mode === "refactor") {
-            // Extract everything after the first [REVISED_CODE] tag
-            const parts = data.processTask.split(/\[REVISED_CODE\]:?/i);
+        console.info(`[GAIIA] All chunks uploaded. Triggering synthesis...`);
+        await executeGraphQL(SYNTHESIZE_AUDIT_MUTATION, {
+            expertEmail: activeExpertEmail,
+            auditId,
+            mode,
+            repoName,
+            branch
+        });
+
+        console.info(`[GAIIA] Synthesis triggered. Polling for results...`);
+        const finalResponse = await pollForResults(activeExpertEmail, auditId);
+        console.info(`[GAIIA] Received final response (${finalResponse.length} bytes).`);
+
+        if (mode === "refactor") {
+            const parts = finalResponse.split(/\[REVISED_CODE\]:?/i);
             if (parts.length > 1) {
-              // Join all parts after the tag and remove any other subsequent tags (only at start of line to avoid accidental cuts)
               const combinedContent = parts.slice(1).join("\n");
+              // Improved cleaning to handle markers like "- [REVISED_CODE]" or "### [REVISED_CODE]"
               const cleanContent = combinedContent.split(/\n\[[A-Z0-9_]{3,}\]/)[0].trim();
+              console.info(`[GAIIA] Cleaned Refactor Content (first 500 chars):\n${cleanContent.substring(0, 500)}`);
               const refactoredFiles = parseRefactoredContent(cleanContent);
+              
+              if (refactoredFiles.length === 0) {
+                console.warn("[GAIIA] No refactored files parsed from response, even though REVISED_CODE marker was present.");
+              }
+
               for (const rf of refactoredFiles) {
                 console.info(`[GAIIA] Applying refactor to: ${rf.path}`);
                 writeFileData(directory_path, rf);
-                modifiedFiles.push(rf.path);
               }
+            } else {
+              console.warn("[GAIIA] No [REVISED_CODE] marker found in synthesized response.");
             }
-          }
-          console.info(`[GAIIA] Completed chunk ${i + 1}/${chunks.length}.`);
-        }
-
-        if (mode === "audit") {
-            console.info(`[GAIIA] Synthesizing final audit report...`);
-            const synthesisPrompt = `[EXPERT_AUDITS_FOR_SYNTHESIS]\n${chunkResults.join("\n\n--- Next Chunk Audit ---\n\n")}`;
-            const finalData = await executeGraphQL(PROCESS_TASK_MUTATION, {
-                expertEmail: activeExpertEmail,
-                codeContent: synthesisPrompt,
-            });
-
             return {
-                content: [{ type: "text", text: finalData.processTask }],
-            };
-        } else {
-            return {
-                content: [{ type: "text", text: `# GAIIA Refactor Complete\n\nSuccessfully refactored and updated ${modifiedFiles.length} files in ${directory_path}.\n\n### Modified Files:\n${modifiedFiles.map(f => `- ${f}`).join("\n")}` }],
+                content: [{ type: "text", text: `# GAIIA Refactor Complete\n\nSuccessfully processed chunks and applied refactors. Result length: ${finalResponse.length} chars.` }],
             };
         }
+
+        return {
+            content: [{ type: "text", text: finalResponse }],
+        };
       }
 
       default:
@@ -232,6 +248,37 @@ ${chunks[i]}`;
     };
   }
 });
+
+async function pollForResults(expertEmail: string, auditId: string): Promise<string> {
+    const maxAttempts = 60; // 5 minutes (5s interval)
+    let attempts = 0;
+
+    while (attempts < maxAttempts) {
+        try {
+            const data = await executeGraphQL(GET_AUDIT_RESULT_QUERY, { expertEmail, auditId });
+            const result = data.getAuditResult;
+            if (result) {
+                // If result is a signed URL, fetch the actual content
+                if (result.startsWith("http")) {
+                  console.info(`[GAIIA] Result ready at S3. Fetching...`);
+                  const res = await fetch(result);
+                  return await res.text();
+                }
+                return result;
+            }
+        } catch (e) {
+            console.error(`[GAIIA] Polling error:`, e);
+        }
+        attempts++;
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        if (attempts % 6 === 0) {
+            const elapsed = attempts * 5;
+            const progress = Math.min(Math.round((attempts / maxAttempts) * 100), 99);
+            console.info(`[GAIIA] Analysis in progress... ${progress}% (${elapsed}s elapsed)`);
+        }
+    }
+    throw new Error("Audit synthesis timed out. Please check the dashboard later.");
+}
 
 async function main() {
   const transport = new StdioServerTransport();
