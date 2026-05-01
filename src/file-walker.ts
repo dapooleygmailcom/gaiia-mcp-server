@@ -8,7 +8,8 @@ const WHITELIST_EXTENSIONS = [
 
 const BLACKLIST_DIRS = [
   "node_modules", ".git", "dist", "build", "target", "bin", "obj", ".vscode", ".idea", "vendor",
-  ".next", ".nuxt", ".docusaurus", ".yarn", "out", "coverage", "__pycache__", ".mypy_cache"
+  ".next", ".nuxt", ".docusaurus", ".yarn", "out", "coverage", "__pycache__", ".mypy_cache",
+  "assets", "static", "public/assets"
 ];
 
 const BLACKLIST_FILES = [
@@ -30,6 +31,7 @@ export function walkDirectory(dir: string, baseDir: string = dir): FileData[] {
   for (const entry of entries) {
     const fullPath = path.join(dir, entry.name);
     const relativePath = path.relative(baseDir, fullPath);
+    const lowerPath = fullPath.toLowerCase();
 
     if (entry.isDirectory()) {
       if (BLACKLIST_DIRS.includes(entry.name)) continue;
@@ -38,7 +40,23 @@ export function walkDirectory(dir: string, baseDir: string = dir): FileData[] {
       const ext = path.extname(entry.name).toLowerCase();
       if (!WHITELIST_EXTENSIONS.includes(ext)) continue;
       if (BLACKLIST_FILES.includes(entry.name)) continue;
-      if (entry.name.endsWith('.min.js') || entry.name.endsWith('.map')) continue;
+
+      const isAsset = lowerPath.includes('node_modules') || 
+                    lowerPath.includes('dist') || 
+                    lowerPath.includes('build') || 
+                    lowerPath.includes('vendor') || 
+                    lowerPath.includes('assets') || 
+                    lowerPath.includes('static') ||
+                    lowerPath.includes('swagger') ||
+                    lowerPath.includes('openapi') ||
+                    lowerPath.includes('telemetry');
+                    
+      const isBundle = lowerPath.includes('bundle') || 
+                     lowerPath.includes('preset') ||
+                     lowerPath.includes('min.js') ||
+                     lowerPath.endsWith('.map');
+
+      if (isAsset || isBundle) continue;
 
       try {
         const content = fs.readFileSync(fullPath, "utf-8");
@@ -47,6 +65,7 @@ export function walkDirectory(dir: string, baseDir: string = dir): FileData[] {
           ? content.substring(0, 500000) + "\n... [TRUNCATED] ..."
           : content;
           
+        console.log(`[FILE] ${relativePath} (${content.length} chars)`);
         files.push({ path: relativePath, content: truncatedContent });
       } catch (err) {
         console.error(`Error reading file ${fullPath}:`, err);
