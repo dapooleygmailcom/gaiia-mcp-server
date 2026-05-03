@@ -154,3 +154,5 @@ debug_*.txt
 test_*
 scratch/
 *.log
+
+*.js

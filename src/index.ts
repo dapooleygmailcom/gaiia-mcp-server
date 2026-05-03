@@ -209,13 +209,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         console.info(`[GAIIA] Received final response (${finalResponse.length} bytes).`);
 
         if (mode === "refactor") {
+            console.error(`[GAIIA] DEBUG_START\n${finalResponse}\n[GAIIA] DEBUG_END`);
             const parts = finalResponse.split(/\[REVISED_CODE\]:?/i);
             if (parts.length > 1) {
               const combinedContent = parts.slice(1).join("\n");
-              // Improved cleaning to handle markers like "- [REVISED_CODE]" or "### [REVISED_CODE]"
-              const cleanContent = combinedContent.split(/\n\[[A-Z0-9_]{3,}\]/)[0].trim();
-              console.info(`[GAIIA] Cleaned Refactor Content (first 500 chars):\n${cleanContent.substring(0, 500)}`);
-              const refactoredFiles = parseRefactoredContent(cleanContent);
+              const refactoredFiles = parseRefactoredContent(combinedContent);
               
               if (refactoredFiles.length === 0) {
                 console.warn("[GAIIA] No refactored files parsed from response, even though REVISED_CODE marker was present.");

@@ -13,7 +13,10 @@ const BLACKLIST_DIRS = [
 ];
 
 const BLACKLIST_FILES = [
-  "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "composer.lock", "Cargo.lock", "mix.lock", "poetry.lock"
+  "package.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml",
+  "composer.json", "composer.lock", "pom.xml", "build.gradle",
+  "cargo.toml", "cargo.lock", "mix.lock", "poetry.lock", "pyproject.toml",
+  "requirements.txt", "gemfile.lock"
 ];
 
 export interface FileData {
@@ -119,27 +122,40 @@ export function writeFileData(baseDir: string, file: FileData): void {
 
 export function parseRefactoredContent(content: string): FileData[] {
   const files: FileData[] = [];
-  // Regex stops at the next File marker, a horizontal rule (---), or the end of the section
-  const regex = /File:\s*([^\s\*]+)[^\n]*\n([\s\S]*?)(?=\n[*\s-]*File:|\n---+\s*\n|$)/gi;
+  const lines = content.split("\n");
   
-  let match;
-  while ((match = regex.exec(content)) !== null) {
-    const filePath = match[1].replace(/[^\w\d./\\-]/g, "").trim();
-    let fileContent = match[2].trim();
-    
-    if (fileContent.startsWith("```")) {
-      fileContent = fileContent.replace(/^```[a-z]*\n?/i, "");
-      fileContent = fileContent.replace(/\n?```$/i, "");
-    }
+  let currentFile: string | null = null;
+  let currentContent: string[] = [];
 
-    // Skip placeholder instructions or echo-ed text
-    if (!filePath || filePath.toLowerCase() === 'path' || filePath.includes('<') || filePath.includes('>')) {
-      console.info(`[GAIIA] Skipping placeholder/instruction block: "${filePath}"`);
-      continue;
-    }
+  const fileHeaderRegex = /[#\s\-/]*(?:File:\s*)?([a-zA-Z0-9._/\\-]+\.(?:java|ts|js|py|md|tsx|jsx|go|rs|cpp|h|cs|php|rb|swift|kt|json|yaml|yml))/i;
 
-    console.info(`[GAIIA] Parsed refactored file: "${filePath}" (${fileContent.length} bytes)`);
-    files.push({ path: filePath, content: fileContent });
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    const match = line.match(fileHeaderRegex);
+
+    // Check if the line is JUST a file header (or a comment containing only a header)
+    // We avoid matching file paths mentioned in sentences by checking line length or prefix
+    const isPotentialHeader = match && (line.length < 150) && (line.includes("File:") || line.startsWith("//") || line.startsWith("---") || line.startsWith("#"));
+
+    if (isPotentialHeader && match) {
+      if (currentFile && currentContent.length > 0) {
+        files.push({ path: currentFile, content: currentContent.join("\n").trim() });
+      }
+      currentFile = match[1].replace(/[^\w\d./\\-]/g, "").trim();
+      currentContent = [];
+      // If the next line is a code block start, skip it
+      if (lines[i+1] && lines[i+1].trim().startsWith("```")) {
+        i++;
+      }
+    } else if (currentFile) {
+      // If we encounter a code block end, we might be at the end of the file
+      if (line === "```") continue;
+      currentContent.push(lines[i]);
+    }
+  }
+
+  if (currentFile && currentContent.length > 0) {
+    files.push({ path: currentFile, content: currentContent.join("\n").trim() });
   }
 
   return files;
