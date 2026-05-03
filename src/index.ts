@@ -39,8 +39,8 @@ const PROCESS_TASK_MUTATION = `
 `;
 
 const SYNTHESIZE_AUDIT_MUTATION = `
-  mutation SynthesizeAudit($expertEmail: String!, $auditId: String!, $mode: String!, $repoName: String, $branch: String) {
-    synthesizeAudit(expertEmail: $expertEmail, auditId: $auditId, mode: $mode, repoName: $repoName, branch: $branch)
+  mutation SynthesizeAudit($expertEmail: String!, $auditId: String!, $mode: String!, $repoName: String, $branch: String, $totalChunkEc: Int) {
+    synthesizeAudit(expertEmail: $expertEmail, auditId: $auditId, mode: $mode, repoName: $repoName, branch: $branch, totalChunkEc: $totalChunkEc)
   }
 `;
 
@@ -166,6 +166,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const chunks = chunkFiles(files);
         console.info(`[GAIIA] Split project into ${chunks.length} chunks. Audit ID: ${auditId}`);
 
+        let totalChunkEc = 0;
+
         for (let i = 0; i < chunks.length; i++) {
           console.info(`[GAIIA] Processing chunk ${i + 1}/${chunks.length}...`);
           
@@ -193,6 +195,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               content: [{ type: "text", text: `### ❌ Audit Aborted\nChunk ${i + 1} failed with error:\n\n${chunkResponse}` }],
             };
           }
+
+          // Accumulate cost if returned in JSON
+          try {
+            const parsed = JSON.parse(chunkResponse);
+            if (parsed.actualEc) {
+              totalChunkEc += parsed.actualEc;
+              console.info(`[GAIIA] Chunk ${i + 1} cost: ${parsed.actualEc} EC (Total so far: ${totalChunkEc})`);
+            }
+          } catch (e) {
+            // Not JSON, likely an older version or inline response — ignore
+          }
         }
 
         console.info(`[GAIIA] All chunks uploaded. Triggering synthesis...`);
@@ -201,7 +214,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             auditId,
             mode,
             repoName,
-            branch
+            branch,
+            totalChunkEc
         });
 
         console.info(`[GAIIA] Synthesis triggered. Polling for results...`);
