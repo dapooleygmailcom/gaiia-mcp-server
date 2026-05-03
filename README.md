@@ -62,7 +62,7 @@ Add the following to your MCP settings configuration:
 
 Lists all available AI experts in the GAIIA registry.
 
-- **Args**: `query` (optional string)
+- **Args**: `query` (optional string) - Search for experts by their email address, name, or specific architectural styles/keywords (e.g., 'Clean Architecture', 'Node.js', 'CQRS').
 
 ### `gaiia_set_active_expert`
 
