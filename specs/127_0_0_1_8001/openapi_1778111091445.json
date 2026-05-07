@@ -1,0 +1,90 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Discovered API for 127.0.0.1:8001",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:8001"
+    }
+  ],
+  "paths": {
+    "/api/driver_console_units": {
+      "get": {
+        "summary": "Auto-discovered GET endpoint",
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "number"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "status": {
+                        "type": "number"
+                      },
+                      "created_by": {
+                        "type": "number"
+                      },
+                      "created_at": {
+                        "type": "string"
+                      },
+                      "updated_by": {
+                        "type": "number"
+                      },
+                      "updated_at": {
+                        "type": "string"
+                      },
+                      "organisation_id": {
+                        "type": "null"
+                      },
+                      "bus_id": {
+                        "type": "null"
+                      },
+                      "os_version": {
+                        "type": "string"
+                      },
+                      "model_name": {
+                        "type": "string"
+                      },
+                      "model_number": {
+                        "type": "string"
+                      },
+                      "serial_number": {
+                        "type": "null"
+                      },
+                      "driver_app_version": {
+                        "type": "null"
+                      },
+                      "connected": {
+                        "type": "number"
+                      },
+                      "last_check_in": {
+                        "type": "string"
+                      },
+                      "license_id": {
+                        "type": "number"
+                      },
+                      "display_node": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

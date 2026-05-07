@@ -13,7 +13,8 @@
     "@modelcontextprotocol/sdk": "^1.0.1",
     "@aws-sdk/client-cognito-identity-provider": "^3.554.0",
     "node-fetch": "^3.3.2",
-    "dotenv": "^16.4.5",
+    "axios": "^1.7.2",
+    "dotenv": "^17.4.2",
     "zod": "^3.22.4"
   },
   "devDependencies": {
