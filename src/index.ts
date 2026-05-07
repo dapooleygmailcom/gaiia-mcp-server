@@ -4,6 +4,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprot
 import { executeGraphQL, logger } from "./core/index.js";
 import { handleTransform, handleAnalyzeProject, setActiveExpert } from "./handlers/transformation-handler.js";
 import { handleInterrogateEndpoint } from "./handlers/integrator-handler.js";
+import { SyncService } from "./services/sync-service.js";
 import "dotenv/config";
 
 const server = new Server(
@@ -39,6 +40,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           properties: {
             query: { type: "string", description: "Optional search query" },
           },
+        },
+      },
+      {
+        name: "sync_specs",
+        description: "Synchronizes all locally discovered API specifications in the 'specs/' directory to the GAIIA Registry.",
+        inputSchema: {
+          type: "object",
+          properties: {}
         },
       },
       {
@@ -130,11 +139,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return { content: [{ type: "text", text: result }] };
       }
 
+      case "sync_specs":
+        const syncResult = await SyncService.syncLocalSpecs();
+        return {
+          content: [{ type: "text", text: syncResult }]
+        };
+
       default:
-        throw new Error(`Unknown tool: ${name}`);
+        throw new Error("Unknown tool");
     }
   } catch (error: any) {
-    return { isError: true, content: [{ type: "text", text: `GAIIA Error: ${error.message}` }] };
+    return {
+      content: [{ type: "text", text: `Error: ${error.message}` }],
+      isError: true,
+    };
   }
 });
 

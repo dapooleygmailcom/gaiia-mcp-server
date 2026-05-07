@@ -54,7 +54,8 @@ export async function mutatePayload(
   url: string,
   previousPayload: any,
   errorMessage: string | any,
-  statusCode: number
+  statusCode: number,
+  hints?: any
 ): Promise<{ payload: any; headers?: Record<string, string> }> {
   // PII scrubbing removed from mutation loop for speed (only required for output artifacts)
   
@@ -69,6 +70,9 @@ Do NOT output any markdown, explanations, or code blocks. Output pure JSON only.
 Rules for "payload":
 1. If the error mentions missing fields, add them with sensible default values.
 2. If the error mentions invalid types, correct them.
+3. Use any provided schema HINTS to determine the correct field names and data types.
+4. IMPORTANT: If a field in the HINTS is marked as "null" or "unknown", do NOT send null. Instead, PROBE for its true type by trying a number, string, or boolean based on the field name (e.g. _id should try a number, _at should try a ISO date string).
+5. If the server rejects a probe with a type error, use that feedback to refine the type in the next iteration.
 
 Rules for "headers":
 1. If the error mentions a missing header, add it to this object. 
@@ -76,21 +80,22 @@ Rules for "headers":
 `;
 
   const truncatedError = typeof errorMessage === 'string' 
-    ? errorMessage.substring(0, 2000) 
-    : JSON.stringify(errorMessage, null, 2).substring(0, 2000);
+    ? errorMessage.substring(0, 4000) 
+    : JSON.stringify(errorMessage, null, 2).substring(0, 4000);
 
-  const userPrompt = `Target Endpoint: ${method} ${url}
+  const cleanedError = truncatedError
+    .replace(/#\d+ .*?\n/g, '') 
+    .replace(/at .*?\(.*?\)/g, '');
 
-Previous Payload:
-${JSON.stringify(previousPayload, null, 2)}
+  let userPrompt = `Endpoint: ${method} ${url}
+Hints: ${JSON.stringify(hints)}
+Previous: ${JSON.stringify(previousPayload)}
+Status: ${statusCode}
+Error: ${cleanedError.substring(0, 1000)}
 
-Response Status Code: ${statusCode}
-Response Error:
-${truncatedError}${truncatedError.length >= 2000 ? '... [truncated]' : ''}
+Correct the payload and headers. Output JSON only. If a hint is "null/unknown", PROBE with a number for _id or a string for others.`;
 
-Provide the next JSON payload and any required headers.`;
-
-  const fullPrompt = `[INSTRUCTIONS]\n${systemPrompt}\n\n[SOURCE_CODE]\n${userPrompt}`;
+  const fullPrompt = `[INSTRUCTIONS]\n${systemPrompt}\n\n[CONTEXT]\n${userPrompt}`;
 
   const localUrl = process.env.LOCAL_LLM_URL || 'http://localhost:11434/api/generate';
   const localModel = process.env.LOCAL_LLM_MODEL || 'llama3';
@@ -100,7 +105,7 @@ Provide the next JSON payload and any required headers.`;
       model: localModel,
       prompt: fullPrompt,
       stream: false
-    }, { timeout: 120000 });
+    }, { timeout: 300000 }); // Increased to 5 minutes
     
     const rawContent = response.data.response || response.data.message?.content || '';
     const result = parseJsonFromText(rawContent);
@@ -116,7 +121,9 @@ Provide the next JSON payload and any required headers.`;
 }
 
 function parseJsonFromText(rawContent: string): any {
+  let cleanJson = rawContent;
   try {
+    // 1. Extract JSON block if it exists
     const jsonStart = Math.min(
       rawContent.indexOf('{') === -1 ? Infinity : rawContent.indexOf('{'),
       rawContent.indexOf('[') === -1 ? Infinity : rawContent.indexOf('[')
@@ -127,10 +134,34 @@ function parseJsonFromText(rawContent: string): any {
     );
 
     if (jsonStart !== Infinity && jsonEnd !== -1 && jsonEnd >= jsonStart) {
-      const cleanJson = rawContent.substring(jsonStart, jsonEnd + 1);
+      cleanJson = rawContent.substring(jsonStart, jsonEnd + 1);
+    }
+
+    // 2. Strip comments and handle trailing commas
+    cleanJson = cleanJson
+      .replace(/\/\/.*$/gm, '') // Strip // comments
+      .replace(/\/\*[\s\S]*?\*\//g, '') // Strip /* */ comments
+      .replace(/,(\s*[\]}])/g, '$1'); // Fix trailing commas before } or ]
+
+    // 3. Try to parse
+    try {
+      return JSON.parse(cleanJson);
+    } catch (innerError) {
+      // 4. Basic heuristic to repair missing closing braces (common in truncated LLM output)
+      let openBraces = (cleanJson.match(/\{/g) || []).length;
+      let closeBraces = (cleanJson.match(/\}/g) || []).length;
+      if (openBraces > closeBraces) {
+        cleanJson += '}'.repeat(openBraces - closeBraces);
+      }
+      
+      let openBrackets = (cleanJson.match(/\[/g) || []).length;
+      let closeBrackets = (cleanJson.match(/\]/g) || []).length;
+      if (openBrackets > closeBrackets) {
+        cleanJson += ']'.repeat(openBrackets - closeBrackets);
+      }
+
       return JSON.parse(cleanJson);
     }
-    return JSON.parse(rawContent);
   } catch (e) {
     logger.error("Failed to parse LLM response as JSON. Raw response:", rawContent);
     throw new Error("LLM returned invalid JSON payload.");

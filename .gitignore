@@ -156,3 +156,5 @@ scratch/
 *.log
 
 *.js
+
+specs/

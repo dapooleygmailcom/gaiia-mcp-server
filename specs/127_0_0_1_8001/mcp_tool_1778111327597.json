@@ -1,8 +1,0 @@
-{
-  "name": "get_api_driver_console_units",
-  "description": "Calls the GET http://127.0.0.1:8001/api/driver_console_units endpoint.",
-  "inputSchema": {
-    "type": "object",
-    "properties": {}
-  }
-}

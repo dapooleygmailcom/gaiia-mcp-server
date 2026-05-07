@@ -8,13 +8,13 @@ function inferType(value: any): string {
   return typeof value;
 }
 
-function generateJsonSchema(obj: any): any {
+function generateJsonSchema(obj: any, key?: string): any {
   const type = inferType(obj);
   
   if (type === 'object') {
     const properties: any = {};
-    for (const key in obj) {
-      properties[key] = generateJsonSchema(obj[key]);
+    for (const k in obj) {
+      properties[k] = generateJsonSchema(obj[k], k);
     }
     return {
       type: 'object',
@@ -26,6 +26,20 @@ function generateJsonSchema(obj: any): any {
       type: 'array',
       items
     };
+  } else if (type === 'null') {
+    // HEURISTIC: Guess type based on key if value is null
+    if (key?.endsWith('_id') || key === 'id') return { type: 'number' };
+    if (key?.endsWith('_at') || key?.endsWith('_date') || key?.includes('check_in') || key?.includes('check_out')) return { type: 'string', format: 'date-time' };
+    return { type: 'string' }; // Default to string for unknown nulls
+  } else if (type === 'string' && obj) {
+    // Check if string matches common date formats (ISO with T or SQL with space)
+    const isIsoDate = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}/.test(obj);
+    const isDateOnly = /^\d{4}-\d{2}-\d{2}$/.test(obj);
+    
+    if (isIsoDate) return { type: 'string', format: 'date-time' };
+    if (isDateOnly) return { type: 'string', format: 'date' };
+    
+    return { type: 'string' };
   } else {
     return { type };
   }
@@ -116,6 +130,15 @@ Upon success, the endpoint will return data structured as follows:
 \`\`\`json
 ${JSON.stringify(resSchema, null, 2)}
 \`\`\`
+
+## Agentic Engine Optimization (AEO)
+> [!TIP]
+> **Agent Instructions**:
+> - **Method**: Use \`${method}\` for this endpoint.
+> - **Discovery**: This schema was auto-discovered using local LLM fuzzer probing. 
+> - **Reliability**: If you encounter a 400 error, refer to the 'Context Required' section for the exact structure needed. 
+> - **Temporal Data**: Fields marked with 'date-time' or 'date' format should be provided in standard ISO 8601 format.
+> - **Side-Effects**: Be aware that \`${['POST', 'PUT', 'DELETE'].includes(method.toUpperCase()) ? 'this operation will mutate server state' : 'this is a read-only operation'}\`.
 
 ## Compliance & PII
 > [!NOTE]
