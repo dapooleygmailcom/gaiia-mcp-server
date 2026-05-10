@@ -15,7 +15,7 @@ GAIIA Expert MCP Server is a Model Context Protocol (MCP) server that enables hi
 
 - [Node.js](https://nodejs.org/) (v20 or higher)
 - [npm](https://www.npmjs.com/)
-- An AIIA Cloud environment (AWS Cognito and AppSync API)
+- An GAIIA account (sign up at https://gaiia.dev)
 
 ### Steps
 
@@ -39,7 +39,7 @@ Run the following command to log in and cache your authentication tokens:
 npm run login
 ```
 
-Follow the prompts to enter your credentials. This will store the session in a local `.gaiia_session` file. If you do not have credentials sing up at https://gaiia.dev.
+Follow the prompts to enter your credentials. This will store the session in a local `.gaiia_session` file. If you do not have credentials sign up at https://gaiia.dev.
 
 ## Usage with MCP Clients (e.g., Claude Desktop)
 
@@ -89,10 +89,11 @@ Intelligently interrogates APIs to discover schemas and generate A2A/MCP tools v
 - **Args**: `url`, `method` (GET, POST, AUTO, GRAPHQL), `auth_header`, `base_payload`, `extra_headers`
 
 #### Supported Protocols
+
 1. **REST (JSON)**: Fully supported with automatic OpenAPI synthesis.
 2. **GraphQL**: Auto-detected and introspected. Converts the GraphQL schema into standard MCP Tools.
 3. **XML/SOAP**: Auto-fetches `.xsd` or `.wsdl` from error messages and uses them as LLM hints.
-4. **gRPC (Protobuf)**: Requires `grpc://` URL. **Constraint**: Server *must* have `grpc.reflection.v1alpha.ServerReflection` enabled or the `.proto` schema must be provided. Fuzzing raw binary protobuf without field indexes is computationally impractical.
+4. **gRPC (Protobuf)**: Requires `grpc://` URL. **Constraint**: Server _must_ have `grpc.reflection.v1alpha.ServerReflection` enabled or the `.proto` schema must be provided. Fuzzing raw binary protobuf without field indexes is computationally impractical.
 5. **OData**: Auto-fetches the Entity Data Model from `/$metadata`.
 6. **Bulk CSV (ERP)**: Handles `text/csv` requirements natively.
 7. **EDI (ANSI X12)**: Handles raw text `application/edi-x12` by iteratively guessing missing segments (e.g. ISA, GS, ST) from clear-text errors.
