@@ -92,7 +92,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           type: "object",
           properties: {
             url: { type: "string", description: "The full URL of the endpoint." },
-            method: { type: "string", enum: ["GET", "POST", "PUT", "PATCH", "DELETE"] },
+            method: { type: "string", enum: ["GET", "POST", "PUT", "PATCH", "DELETE", "GRAPHQL", "AUTO"] },
             auth_header: { type: "string", description: "Optional Authorization header." },
             base_payload: { type: "object", description: "Optional base JSON payload." },
             extra_headers: { type: "object", additionalProperties: { type: "string" } },

@@ -7,6 +7,7 @@ import { SchemaService } from '../services/schema-service.js';
 import { logger } from '../core/index.js';
 
 import { mutationRuleBook } from '../services/mutation-rulebook.js';
+import { interrogateGraphQL } from '../services/graphql-service.js';
 
 const MAX_ITERATIONS = 10;
 
@@ -17,6 +18,30 @@ export async function handleInterrogateEndpoint(
   basePayload?: any,
   extraHeaders?: Record<string, string>
 ): Promise<string> {
+  // Check for GraphQL first if AUTO, GRAPHQL, or POST
+  if (['AUTO', 'GRAPHQL', 'POST'].includes(method.toUpperCase())) {
+    try {
+      logger.info(`[Integrator] Probing endpoint ${url} for GraphQL support...`);
+      const gqlResult = await interrogateGraphQL(url, authHeader, extraHeaders);
+      return `Endpoint successfully interrogated as GraphQL.\n\n` + 
+             `=== OpenAPI Document ===\n${gqlResult.openApi}\n\n` +
+             `=== MCP Tool Definition ===\n${gqlResult.mcpTool}\n\n` +
+             `=== A2A Card ===\n${gqlResult.a2aCard}\n\n` + 
+             `Note: GraphQL Schema and files were also written to the workspace.`;
+    } catch (error: any) {
+      if (method.toUpperCase() === 'GRAPHQL') {
+        return `Interrogation failed: ${error.message}`;
+      }
+      logger.info(`[Integrator] GraphQL probe failed. Proceeding with REST assumption...`);
+    }
+  }
+
+  // If AUTO and it's not GraphQL, default to POST if there is a payload, GET otherwise
+  if (method.toUpperCase() === 'AUTO') {
+    method = (basePayload && Object.keys(basePayload).length > 0) ? 'POST' : 'GET';
+    logger.info(`[Integrator] Auto-detected method: ${method}`);
+  }
+
   const isWriteMethod = ['POST', 'PUT', 'PATCH'].includes(method.toUpperCase());
   let currentPayload = basePayload || {};
   
