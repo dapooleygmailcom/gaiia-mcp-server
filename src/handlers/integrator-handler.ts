@@ -8,6 +8,8 @@ import { logger } from '../core/index.js';
 
 import { mutationRuleBook } from '../services/mutation-rulebook.js';
 import { interrogateGraphQL } from '../services/graphql-service.js';
+import { interrogateGRPC } from '../services/grpc-service.js';
+import { interrogateTCP } from '../services/tcp-service.js';
 
 const MAX_ITERATIONS = 10;
 
@@ -18,6 +20,42 @@ export async function handleInterrogateEndpoint(
   basePayload?: any,
   extraHeaders?: Record<string, string>
 ): Promise<string> {
+  // Check for raw TCP socket
+  if (url.startsWith('tcp://')) {
+    try {
+      logger.info(`[Integrator] Detected TCP endpoint. Routing to TCP Service...`);
+      const tcpResult = await interrogateTCP(url, basePayload || '');
+      
+      return `Endpoint successfully interrogated via raw TCP socket.\n\n` + 
+             `=== A2A Card ===\n` +
+             `# A2A Integration Card: TCP Socket (${url})\n` +
+             `## Intent\nSend a raw string payload to this TCP socket.\n\n` +
+             `## Agentic Engine Optimization (AEO)\n> [!TIP]\n> **Agent Instructions**:\n> - Use raw text for the payload.\n> - The response will be a raw string.\n\n` +
+             `Note: Execution succeeded and returned data: ${tcpResult.data}`;
+    } catch (error: any) {
+      // Allow it to fall through to the RL fuzzing loop!
+      logger.info(`[Integrator] TCP initial request failed. Starting TCP RL Fuzzing Loop...`);
+    }
+  }
+
+  // Check for gRPC
+  if (url.startsWith('grpc://') || url.includes('localhost:50051')) {
+    try {
+      logger.info(`[Integrator] Detected gRPC endpoint. Routing to gRPC Service...`);
+      const grpcResult = await interrogateGRPC(url, method === 'AUTO' ? '' : method, basePayload || {}, contextStore.getSchema(url));
+      
+      return `Endpoint successfully interrogated as gRPC.\n\n` + 
+             `=== Protobuf Schema ===\n\`\`\`proto\n${grpcResult.schema.protoFile}\n\`\`\`\n\n` +
+             `=== A2A Card ===\n` +
+             `# A2A Integration Card: gRPC Service (${grpcResult.schema.service})\n` +
+             `## Intent\nCall the \`${grpcResult.schema.invokedMethod}\` method on this gRPC service.\n\n` +
+             `## Agentic Engine Optimization (AEO)\n> [!TIP]\n> **Agent Instructions**:\n> - Use JSON to build the payload. The MCP tool will natively marshal it into binary Protobuf.\n> - Review the Protobuf Schema above for required fields.\n\n` +
+             `Note: Execution succeeded and returned data: ${JSON.stringify(grpcResult.data)}`;
+    } catch (error: any) {
+      return `gRPC Interrogation failed: ${error.message}`;
+    }
+  }
+
   // Check for GraphQL first if AUTO, GRAPHQL, or POST
   if (['AUTO', 'GRAPHQL', 'POST'].includes(method.toUpperCase())) {
     try {
@@ -83,16 +121,29 @@ export async function handleInterrogateEndpoint(
     }
 
     try {
-      const response = await axios({
-        method,
-        url,
-        data: ['GET'].includes(method.toUpperCase()) ? undefined : currentPayload,
-        headers,
-        validateStatus: () => true
-      });
+      let status: number;
+      let data: any;
 
-      const status = response.status;
-      const data = response.data;
+      if (url.startsWith('tcp://')) {
+        try {
+          const tcpRes = await interrogateTCP(url, currentPayload);
+          status = 200;
+          data = tcpRes.data;
+        } catch (err: any) {
+          status = 400; // Simulate bad request for fuzzing
+          data = err.message;
+        }
+      } else {
+        const response = await axios({
+          method,
+          url,
+          data: ['GET'].includes(method.toUpperCase()) ? undefined : currentPayload,
+          headers,
+          validateStatus: () => true
+        });
+        status = response.status;
+        data = response.data;
+      }
 
       if (status >= 200 && status < 300) {
         logger.info(`[Iteration ${iteration}] Success! Endpoint accepted payload.`);
@@ -111,7 +162,8 @@ export async function handleInterrogateEndpoint(
           }
         }
 
-        const artifacts = await synthesizeArtifacts(method, url, currentPayload, data);
+        const contentType = headers['Content-Type'] || 'application/json';
+        const artifacts = await synthesizeArtifacts(method, url, currentPayload, data, contentType);
         
         await sendTelemetry({
           url: artifacts.normalizedUrl,
@@ -147,11 +199,28 @@ export async function handleInterrogateEndpoint(
                  `Error: ${errorString.substring(0, 500)}...`;
         }
 
+        // Schema Auto-Fetch Logic
+        const schemaUrlMatch = errorString.match(/https?:\/\/[^\s"'<>]+(?:\.xsd|\.wsdl|\?xsd|\?wsdl|\/\$metadata)/i);
+        let currentHints = hints;
+        if (schemaUrlMatch && schemaUrlMatch[0]) {
+          logger.info(`[Integrator] Found schema hint URL: ${schemaUrlMatch[0]}. Fetching...`);
+          try {
+            const schemaRes = await axios.get(schemaUrlMatch[0], { timeout: 5000 });
+            if (schemaRes.status === 200 && schemaRes.data) {
+              const condensedSchema = typeof schemaRes.data === 'string' ? schemaRes.data.substring(0, 2000) : JSON.stringify(schemaRes.data).substring(0, 2000);
+              logger.info(`[Integrator] Successfully fetched schema. Feeding to LLM.`);
+              currentHints = { ...(currentHints || {}), fetchedSchema: condensedSchema };
+            }
+          } catch (e) {
+            logger.info(`[Integrator] Failed to fetch schema from ${schemaUrlMatch[0]}`);
+          }
+        }
+
         // Try the RuleBook first
         let mutation = mutationRuleBook.getMutation(errorString);
         
         if (!mutation) {
-          mutation = await mutatePayload(method, url, currentPayload, data, status, hints);
+          mutation = await mutatePayload(method, url, currentPayload, data, status, currentHints);
           // Stage this mutation to be recorded if the NEXT iteration succeeds
           lastErrorString = errorString;
           lastMutation = mutation;

@@ -49,7 +49,8 @@ export async function synthesizeArtifacts(
   method: string,
   urlStr: string,
   requestPayload: any,
-  responsePayload: any
+  responsePayload: any,
+  contentType: string = 'application/json'
 ) {
   const url = new URL(urlStr);
   
@@ -84,7 +85,7 @@ export async function synthesizeArtifacts(
           requestBody: ['GET', 'DELETE'].includes(method.toUpperCase()) ? undefined : {
             required: true,
             content: {
-              "application/json": {
+              [contentType]: {
                 schema: reqSchema
               }
             }
@@ -105,24 +106,33 @@ export async function synthesizeArtifacts(
   };
 
   // 3. MCP Tool Definition
-  const toolName = `${method.toLowerCase()}_${pathName.replace(/[^a-zA-Z0-9]/g, '_').replace(/^_+|_+$/g, '')}`;
+  let rpcMethod = '';
+  if (contentType.includes('json') && typeof requestPayload === 'object' && requestPayload.jsonrpc && requestPayload.method) {
+    rpcMethod = requestPayload.method;
+  } else if (contentType.includes('xml') && typeof requestPayload === 'string' && requestPayload.includes('<methodName>')) {
+    const match = requestPayload.match(/<methodName>(.*?)<\/methodName>/);
+    if (match && match[1]) rpcMethod = match[1];
+  }
+
+  const baseToolName = `${method.toLowerCase()}_${pathName.replace(/[^a-zA-Z0-9]/g, '_').replace(/^_+|_+$/g, '')}`;
+  const toolName = rpcMethod ? `${baseToolName}_${rpcMethod.replace(/[^a-zA-Z0-9]/g, '_')}` : baseToolName;
   const mcpTool = {
     name: toolName,
-    description: `Calls the ${method} ${normalizedUrl} endpoint.`,
+    description: rpcMethod ? `Calls the ${rpcMethod} RPC method on ${normalizedUrl}.` : `Calls the ${method} ${normalizedUrl} endpoint.`,
     inputSchema: reqSchema
   };
 
   // 4. A2A Card (Markdown)
   const a2aCard = `
-# A2A Integration Card: ${host}${pathName}
+# A2A Integration Card: ${host}${pathName}${rpcMethod ? ` (${rpcMethod})` : ''}
 
 ## Intent
-This endpoint allows an agent to perform a \`${method}\` operation against \`${pathName}\`.
+${rpcMethod ? `This endpoint acts as an RPC gateway. This card describes how to execute the \`${rpcMethod}\` operation.` : `This endpoint allows an agent to perform a \`${method}\` operation against \`${pathName}\`.`}
 
 ## Context Required
-To successfully call this endpoint, you must provide a JSON body matching the following structure:
-\`\`\`json
-${JSON.stringify(reqSchema, null, 2)}
+To successfully call this endpoint, you must provide a \`${contentType}\` body matching the following structure:
+\`\`\`${contentType.includes('json') ? 'json' : contentType.includes('xml') ? 'xml' : contentType.includes('edi') ? 'text' : 'text'}
+${contentType.includes('json') ? JSON.stringify(reqSchema, null, 2) : contentType.includes('xml') ? 'Raw XML String (e.g. <Root>...</Root>)' : contentType.includes('edi') ? 'Raw EDI X12 String (e.g. ISA*00*...~)' : 'Raw Data String/CSV'}
 \`\`\`
 
 ## Expected Output

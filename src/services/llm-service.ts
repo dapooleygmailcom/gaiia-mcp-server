@@ -73,10 +73,27 @@ Rules for "payload":
 3. Use any provided schema HINTS to determine the correct field names and data types.
 4. IMPORTANT: If a field in the HINTS is marked as "null" or "unknown", do NOT send null. Instead, PROBE for its true type by trying a number, string, or boolean based on the field name (e.g. _id should try a number, _at should try a ISO date string).
 5. If the server rejects a probe with a type error, use that feedback to refine the type in the next iteration.
+6. IMPORTANT: If the server rejects JSON with a 415 or 400 error indicating a CSV or text format is required, mutate the payload into a raw CSV string.
+7. IMPORTANT: If the server rejects the request indicating an XML format is required (or 415 application/xml), you MUST mutate the payload into a valid XML string.
+8. IMPORTANT: If the server demands 'application/edi-x12' or returns an EDI error, construct a raw EDI string. Use '*' as the element separator and '~' as the segment terminator. Start with 'ISA*' and add segments like 'GS*', 'ST*', 'BEG*' iteratively based on error feedback.
+9. IMPORTANT: If the server is an OData endpoint (errors mention OData or you see /$metadata in hints), strictly format the JSON payload to match the OData Entity Data Model provided in the hints.
+10. IMPORTANT: If the error contains 'jsonrpc' or codes like -32600, it is a JSON-RPC endpoint. The payload MUST be a JSON object like {"jsonrpc": "2.0", "method": "guess", "params": []}. Use the error message to guess the correct "method" name.
+11. IMPORTANT: If the error contains '<fault>' or mentions methodCall, it is an XML-RPC endpoint. The payload MUST be a raw XML string structured with <methodCall><methodName>guess</methodName><params>...</params></methodCall>.
+12. IMPORTANT: If the endpoint is a tcp:// socket or the error mentions ISO 8583, MTI, or Bitmaps, you MUST construct a raw text ISO 8583 string using the format MTI|BITMAP|FIELD3|FIELD4. Start with '0200' and use error feedback to build the string (e.g., 0200|B220...|000000|000000001000).
+13. TACTICAL BYPASS: If your payload is a raw string (like CSV, XML, EDI, or ISO 8583), DO NOT put it inside the JSON "payload" key. Instead, output the JSON containing ONLY the "headers" key, then output the exact delimiter "===PAYLOAD===" on a new line, followed by the raw CSV/XML/EDI/ISO8583 string.
+Example:
+{
+  "headers": { "Content-Type": "application/xml" }
+}
+===PAYLOAD===
+<Root><Data>Val</Data></Root>
 
 Rules for "headers":
-1. If the error mentions a missing header, add it to this object. 
+1. If the error explicitly requires a missing HTTP/request header, add it. WARNING: If your payload is a CSV string, any error mentioning "header" refers to the CSV column headers (first row of data), NOT HTTP headers. NEVER put CSV column names into this HTTP headers object! If a CSV column is missing, add it to the CSV string in the "payload".
 2. If you don't know the value, use a placeholder like "REQUIRED_VALUE".
+3. If you mutate the payload into a CSV string, you MUST update the "Content-Type" header to "text/csv".
+4. If you mutate the payload into an XML string, you MUST update the "Content-Type" header to "application/xml" or "text/xml" as required.
+5. If you mutate the payload into an EDI string, you MUST update the "Content-Type" header to "application/edi-x12".
 `;
 
   const truncatedError = typeof errorMessage === 'string' 
@@ -122,6 +139,14 @@ Correct the payload and headers. Output JSON only. If a hint is "null/unknown", 
 
 function parseJsonFromText(rawContent: string): any {
   let cleanJson = rawContent;
+  let rawPayloadStr: string | null = null;
+  
+  if (rawContent.includes('===PAYLOAD===')) {
+    const parts = rawContent.split('===PAYLOAD===');
+    cleanJson = parts[0];
+    rawPayloadStr = parts[1].trim();
+  }
+
   try {
     // 1. Extract JSON block if it exists
     const jsonStart = Math.min(
@@ -144,8 +169,9 @@ function parseJsonFromText(rawContent: string): any {
       .replace(/,(\s*[\]}])/g, '$1'); // Fix trailing commas before } or ]
 
     // 3. Try to parse
+    let parsed: any;
     try {
-      return JSON.parse(cleanJson);
+      parsed = JSON.parse(cleanJson);
     } catch (innerError) {
       // 4. Basic heuristic to repair missing closing braces (common in truncated LLM output)
       let openBraces = (cleanJson.match(/\{/g) || []).length;
@@ -160,8 +186,14 @@ function parseJsonFromText(rawContent: string): any {
         cleanJson += ']'.repeat(openBrackets - closeBrackets);
       }
 
-      return JSON.parse(cleanJson);
+      parsed = JSON.parse(cleanJson);
     }
+    
+    if (rawPayloadStr) {
+      if (!parsed || typeof parsed !== 'object') parsed = {};
+      parsed.payload = rawPayloadStr;
+    }
+    return parsed;
   } catch (e) {
     logger.error("Failed to parse LLM response as JSON. Raw response:", rawContent);
     throw new Error("LLM returned invalid JSON payload.");

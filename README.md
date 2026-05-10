@@ -82,6 +82,23 @@ Audits or refactors an entire local directory.
 
 - **Args**: `directory_path`, `mode` ("audit" or "refactor")
 
+### `interrogate_endpoint`
+
+Intelligently interrogates APIs to discover schemas and generate A2A/MCP tools via reinforcement learning fuzzing.
+
+- **Args**: `url`, `method` (GET, POST, AUTO, GRAPHQL), `auth_header`, `base_payload`, `extra_headers`
+
+#### Supported Protocols
+1. **REST (JSON)**: Fully supported with automatic OpenAPI synthesis.
+2. **GraphQL**: Auto-detected and introspected. Converts the GraphQL schema into standard MCP Tools.
+3. **XML/SOAP**: Auto-fetches `.xsd` or `.wsdl` from error messages and uses them as LLM hints.
+4. **gRPC (Protobuf)**: Requires `grpc://` URL. **Constraint**: Server *must* have `grpc.reflection.v1alpha.ServerReflection` enabled or the `.proto` schema must be provided. Fuzzing raw binary protobuf without field indexes is computationally impractical.
+5. **OData**: Auto-fetches the Entity Data Model from `/$metadata`.
+6. **Bulk CSV (ERP)**: Handles `text/csv` requirements natively.
+7. **EDI (ANSI X12)**: Handles raw text `application/edi-x12` by iteratively guessing missing segments (e.g. ISA, GS, ST) from clear-text errors.
+8. **JSON-RPC / XML-RPC**: Iteratively builds valid RPC envelopes and dynamically extracts the inner method for specific tool naming.
+9. **ISO 8583 (TCP Sockets)**: Requires `tcp://` URL. Bypasses HTTP entirely to establish raw socket connections for payment gateway fuzzing.
+
 ## License
 
 MIT
