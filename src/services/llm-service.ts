@@ -20,7 +20,7 @@ export async function scrubSensitiveData(data: any): Promise<any> {
   }
 
   const localUrl = process.env.LOCAL_LLM_URL || 'http://localhost:11434/api/generate';
-  const localModel = process.env.LOCAL_LLM_MODEL || 'llama3';
+  const localModel = process.env.LOCAL_LLM_MODEL || 'gemma4:e2b';
 
   const prompt = `[INSTRUCTIONS]
 You are a privacy-first data scrubber. Analyze the following data and identify any PII (Personally Identifiable Information), secrets, or credentials.
@@ -115,7 +115,7 @@ Correct the payload and headers. Output JSON only. If a hint is "null/unknown", 
   const fullPrompt = `[INSTRUCTIONS]\n${systemPrompt}\n\n[CONTEXT]\n${userPrompt}`;
 
   const localUrl = process.env.LOCAL_LLM_URL || 'http://localhost:11434/api/generate';
-  const localModel = process.env.LOCAL_LLM_MODEL || 'llama3';
+  const localModel = process.env.LOCAL_LLM_MODEL || 'gemma4:e2b';
 
   try {
     const response = await axios.post(localUrl, {
