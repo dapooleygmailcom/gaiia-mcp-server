@@ -158,3 +158,5 @@ scratch/
 *.js
 
 specs/
+test_workflows.js
+src/scripts/

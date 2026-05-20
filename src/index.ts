@@ -4,6 +4,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprot
 import { executeGraphQL, logger } from "./core/index.js";
 import { handleTransform, handleAnalyzeProject, setActiveExpert } from "./handlers/transformation-handler.js";
 import { handleInterrogateEndpoint } from "./handlers/integrator-handler.js";
+import { handleListBpmnTemplates, handleTriggerProcessInstance } from "./handlers/workflow-handler.js";
 import { SyncService } from "./services/sync-service.js";
 import "dotenv/config";
 
@@ -100,6 +101,26 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ["url", "method"],
         },
       },
+      {
+        name: "gaiia_list_processes",
+        description: "List all registered BPMN process blueprints/templates in the GAIIA registry for the authenticated tenant.",
+        inputSchema: {
+          type: "object",
+          properties: {},
+        },
+      },
+      {
+        name: "gaiia_start_process",
+        description: "Starts/triggers an instance of a registered BPMN process blueprint with an optional custom payload.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            process_type: { type: "string", description: "The unique processType/slug of the BPMN blueprint (e.g. driver-roster-change)" },
+            payload: { type: "object", description: "Optional custom JSON payload context for the process run" },
+          },
+          required: ["process_type"],
+        },
+      },
     ],
   };
 });
@@ -137,6 +158,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const { url, method, auth_header, base_payload, extra_headers } = args as any;
         const result = await handleInterrogateEndpoint(url, method, auth_header, base_payload, extra_headers);
         return { content: [{ type: "text", text: result }] };
+      }
+
+      case "gaiia_list_processes": {
+        const templates = await handleListBpmnTemplates();
+        return { content: [{ type: "text", text: JSON.stringify(templates, null, 2) }] };
+      }
+
+      case "gaiia_start_process": {
+        const { process_type, payload } = args as { process_type: string; payload?: any };
+        const result = await handleTriggerProcessInstance(process_type, payload);
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
       }
 
       case "sync_specs":
