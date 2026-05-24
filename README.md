@@ -64,29 +64,44 @@ Lists all available AI experts in the GAIIA registry.
 
 - **Args**: `query` (optional string) - Search for experts by their email address, name, or specific architectural styles/keywords (e.g., 'Clean Architecture', 'Node.js', 'CQRS').
 
+### `sync_specs`
+
+Synchronizes all locally fuzzed and discovered API specifications in the `specs/` directory back to the cloud GAIIA Registry.
+
+- **Args**: None
+
 ### `gaiia_set_active_expert`
 
-Sets the expert to be used for subsequent transformations.
+Sets the expert to be used for subsequent code transformations.
 
-- **Args**: `email` (required string)
+- **Args**: `email` (required string) - The email address of the expert proxy.
 
 ### `gaiia_transform`
 
 Processes a single block of code with the active expert.
 
-- **Args**: `code`, `instructions`
+- **Args**: 
+  - `code` (required string) - The source code block to process.
+  - `instructions` (required string) - Specific refactoring, audit, or generation instructions.
 
 ### `gaiia_analyze_project`
 
 Audits or refactors an entire local directory.
 
-- **Args**: `directory_path`, `mode` ("audit" or "refactor")
+- **Args**: 
+  - `directory_path` (required string) - Absolute path to the local project folder.
+  - `mode` (optional string) - "audit" or "refactor". Default is "audit".
 
 ### `interrogate_endpoint`
 
 Intelligently interrogates APIs to discover schemas and generate A2A/MCP tools via reinforcement learning fuzzing.
 
-- **Args**: `url`, `method` (GET, POST, AUTO, GRAPHQL), `auth_header`, `base_payload`, `extra_headers`
+- **Args**: 
+  - `url` (required string) - The full API URL (supports `http://`, `https://`, `grpc://`, or `tcp://` for sockets).
+  - `method` (required string) - HTTP Method: `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `GRAPHQL`, or `AUTO`.
+  - `auth_header` (optional string) - Optional authentication header (e.g., `Bearer token`).
+  - `base_payload` (optional object) - Starting template payload to fuzz.
+  - `extra_headers` (optional object) - Map of custom headers.
 
 #### Supported Protocols
 
@@ -99,6 +114,20 @@ Intelligently interrogates APIs to discover schemas and generate A2A/MCP tools v
 7. **EDI (ANSI X12)**: Handles raw text `application/edi-x12` by iteratively guessing missing segments (e.g. ISA, GS, ST) from clear-text errors.
 8. **JSON-RPC / XML-RPC**: Iteratively builds valid RPC envelopes and dynamically extracts the inner method for specific tool naming.
 9. **ISO 8583 (TCP Sockets)**: Requires `tcp://` URL. Bypasses HTTP entirely to establish raw socket connections for payment gateway fuzzing.
+
+### `gaiia_list_processes`
+
+List all registered BPMN process blueprints/templates in the GAIIA registry for the authenticated workspace.
+
+- **Args**: None
+
+### `gaiia_start_process`
+
+Starts/triggers an active execution instance of a registered BPMN process blueprint in the cloud with an initial business payload context.
+
+- **Args**: 
+  - `process_type` (required string) - The unique processType/slug of the BPMN template (e.g. `employee-onboarding` or `pax-terminal-procurement`).
+  - `payload` (optional object) - Initial custom JSON payload context for the process run.
 
 ## License
 
