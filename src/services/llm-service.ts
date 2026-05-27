@@ -112,15 +112,17 @@ Error: ${cleanedError.substring(0, 1000)}
 
 Correct the payload and headers. Output JSON only. If a hint is "null/unknown", PROBE with a number for _id or a string for others.`;
 
-  const fullPrompt = `[INSTRUCTIONS]\n${systemPrompt}\n\n[CONTEXT]\n${userPrompt}`;
-
+  // NOTE: systemPrompt (static rules) is sent via the dedicated `system` field so
+  // Ollama can prefix-cache it across repeated mutation attempts on the same endpoint.
+  // userPrompt (dynamic per-call context) stays in `prompt`.
   const localUrl = process.env.LOCAL_LLM_URL || 'http://localhost:11434/api/generate';
   const localModel = process.env.LOCAL_LLM_MODEL || 'gemma4:e2b';
 
   try {
     const response = await axios.post(localUrl, {
       model: localModel,
-      prompt: fullPrompt,
+      system: systemPrompt,
+      prompt: userPrompt,
       stream: false
     }, { timeout: 300000 }); // Increased to 5 minutes
     
