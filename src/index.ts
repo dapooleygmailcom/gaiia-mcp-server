@@ -2,7 +2,7 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { executeGraphQL, logger } from "./core/index.js";
-import { handleTransform, handleAnalyzeProject, setActiveExpert } from "./handlers/transformation-handler.js";
+import { handleTransform, handleAnalyzeProject, handleIngestProject, setActiveExpert } from "./handlers/transformation-handler.js";
 import { handleInterrogateEndpoint } from "./handlers/integrator-handler.js";
 import { handleListBpmnTemplates, handleTriggerProcessInstance } from "./handlers/workflow-handler.js";
 import { SyncService } from "./services/sync-service.js";
@@ -87,6 +87,17 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
+        name: "gaiia_ingest_project",
+        description: "Scan a local project directory and ingest its code samples into the active expert's VectorDB memory.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            directory_path: { type: "string", description: "The absolute path to the project directory" },
+          },
+          required: ["directory_path"],
+        },
+      },
+      {
         name: "interrogate_endpoint",
         description: "Intelligently interrogates a REST endpoint to discover its schema via reinforcement learning loop.",
         inputSchema: {
@@ -151,6 +162,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "gaiia_analyze_project": {
         const { directory_path, mode = "audit" } = args as { directory_path: string; mode?: "audit" | "refactor" };
         const result = await handleAnalyzeProject(directory_path, mode);
+        return { content: [{ type: "text", text: result }] };
+      }
+
+      case "gaiia_ingest_project": {
+        const { directory_path } = args as { directory_path: string };
+        const result = await handleIngestProject(directory_path);
         return { content: [{ type: "text", text: result }] };
       }
 

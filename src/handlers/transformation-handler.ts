@@ -2,15 +2,22 @@ import { executeGraphQL, logger } from '../core/index.js';
 import { walkDirectory, chunkFiles, parseRefactoredContent, writeFileData, getRepoContext } from "../file-walker.js";
 import crypto from "crypto";
 
-const PROCESS_TASK_MUTATION = `
-  mutation ProcessTask($expertEmail: String!, $codeContent: String!, $auditId: String, $chunkIndex: Int, $repoName: String, $branch: String, $mode: String) {
-    processTask(expertEmail: $expertEmail, codeContent: $codeContent, auditId: $auditId, chunkIndex: $chunkIndex, repoName: $repoName, branch: $branch, mode: $mode)
+const SUBMIT_JOB_MUTATION = `
+  mutation SubmitJob($jobType: String!, $payload: String!, $auditId: String) {
+    submitJob(jobType: $jobType, payload: $payload, auditId: $auditId) {
+      jobId
+      status
+    }
   }
 `;
 
-const SYNTHESIZE_AUDIT_MUTATION = `
-  mutation SynthesizeAudit($expertEmail: String!, $auditId: String!, $mode: String!, $repoName: String, $branch: String, $totalChunkEc: Int) {
-    synthesizeAudit(expertEmail: $expertEmail, auditId: $auditId, mode: $mode, repoName: $repoName, branch: $branch, totalChunkEc: $totalChunkEc)
+const GET_JOB_STATUS_QUERY = `
+  query GetJobStatus($jobId: ID!) {
+    getJobStatus(jobId: $jobId) {
+      jobId
+      status
+      result
+    }
   }
 `;
 
@@ -36,12 +43,22 @@ export async function handleTransform(code: string, instructions: string) {
   }
 
   const fullInput = `[INSTRUCTIONS]\n${instructions}\n\n[SOURCE_CODE]\n${code}`;
-  const data = await executeGraphQL(PROCESS_TASK_MUTATION, {
+  
+  const payload = JSON.stringify({
     expertEmail: activeExpertEmail,
     codeContent: fullInput,
   });
 
-  return data.processTask;
+  const data = await executeGraphQL(SUBMIT_JOB_MUTATION, {
+    jobType: "PROCESS_CHUNK",
+    payload
+  });
+
+  const jobId = data.submitJob.jobId;
+  logger.info(`Submitted inline refactor job ${jobId}. Polling...`);
+  
+  const result = await pollForJob(jobId);
+  return result;
 }
 
 export async function handleAnalyzeProject(directory_path: string, mode: "audit" | "refactor" = "audit") {
@@ -62,16 +79,15 @@ export async function handleAnalyzeProject(directory_path: string, mode: "audit"
   logger.info(`Split project into ${chunks.length} chunks. Audit ID: ${auditId}`);
 
   let totalChunkEc = 0;
+  const chunkJobIds: string[] = [];
 
   for (let i = 0; i < chunks.length; i++) {
-    logger.info(`Processing chunk ${i + 1}/${chunks.length}...`);
-    
     let chunkInput = chunks[i];
     if (mode === "refactor") {
       chunkInput = `[REFACTOR_TASK]\nCRITICAL: REFACTOR MODE ENABLED.\n\nFILES TO REFACTOR:\n${chunks[i]}`;
     }
 
-    const data = await executeGraphQL(PROCESS_TASK_MUTATION, {
+    const payload = JSON.stringify({
       expertEmail: activeExpertEmail,
       codeContent: chunkInput,
       auditId,
@@ -81,32 +97,46 @@ export async function handleAnalyzeProject(directory_path: string, mode: "audit"
       mode
     });
 
-    const chunkResponse = data.processTask || "";
-    if (chunkResponse.includes("[STATUS]: Error") || chunkResponse.includes("## [ERROR_DETAILS]")) {
-      logger.error(`Critical failure in chunk ${i + 1}. Aborting audit.`);
-      throw new Error(`Audit Aborted: Chunk ${i + 1} failed with error:\n\n${chunkResponse}`);
-    }
+    const data = await executeGraphQL(SUBMIT_JOB_MUTATION, {
+      jobType: "PROCESS_CHUNK",
+      payload,
+      auditId
+    });
 
-    try {
-      const parsed = JSON.parse(chunkResponse);
-      if (parsed.actualEc) {
-        totalChunkEc += parsed.actualEc;
-        logger.info(`Chunk ${i + 1} cost: ${parsed.actualEc} EC (Total so far: ${totalChunkEc})`);
-      }
-    } catch (e) {
-      // Not JSON, ignore
-    }
+    chunkJobIds.push(data.submitJob.jobId);
   }
 
-  logger.info(`All chunks uploaded. Triggering synthesis...`);
-  await executeGraphQL(SYNTHESIZE_AUDIT_MUTATION, {
-      expertEmail: activeExpertEmail,
-      auditId,
-      mode,
-      repoName,
-      branch,
-      totalChunkEc
+  logger.info(`Submitted ${chunkJobIds.length} chunk jobs. Polling for chunk completion...`);
+  const chunkResults = await pollForMultipleJobs(chunkJobIds);
+
+  for (const result of chunkResults) {
+    try {
+      const parsed = JSON.parse(result);
+      if (parsed.actualEc) {
+        totalChunkEc += parsed.actualEc;
+      }
+    } catch (e) {}
+  }
+  logger.info(`All chunks processed. Total Chunk EC: ${totalChunkEc}. Triggering synthesis...`);
+  
+  const synthPayload = JSON.stringify({
+    expertEmail: activeExpertEmail,
+    auditId,
+    mode,
+    repoName,
+    branch,
+    totalChunkEc
   });
+
+  const synthData = await executeGraphQL(SUBMIT_JOB_MUTATION, {
+      jobType: "SYNTHESIZE_AUDIT",
+      payload: synthPayload,
+      auditId
+  });
+
+  const synthJobId = synthData.submitJob.jobId;
+  logger.info(`Synthesis job ${synthJobId} submitted. Polling for results...`);
+  await pollForJob(synthJobId);
 
   logger.info(`Synthesis triggered. Polling for results...`);
   const finalResponse = await pollForResults(activeExpertEmail, auditId);
@@ -129,8 +159,103 @@ export async function handleAnalyzeProject(directory_path: string, mode: "audit"
   return finalResponse;
 }
 
+export async function handleIngestProject(directory_path: string) {
+  if (!activeExpertEmail) {
+    throw new Error("No active expert set. Use gaiia_set_active_expert first.");
+  }
+
+  logger.info(`Starting project ingestion for: ${directory_path}`);
+  const { repoName, branch } = getRepoContext(directory_path);
+  const auditId = crypto.randomUUID();
+  
+  const files = walkDirectory(directory_path);
+  if (files.length === 0) {
+    throw new Error("No valid code files found.");
+  }
+
+  const chunks = chunkFiles(files);
+  logger.info(`Split project into ${chunks.length} chunks. Audit ID: ${auditId}`);
+
+  const chunkJobIds: string[] = [];
+
+  for (let i = 0; i < chunks.length; i++) {
+    const payload = JSON.stringify({
+      expertEmail: activeExpertEmail,
+      codeContent: chunks[i],
+      auditId,
+      chunkIndex: i,
+      repoName,
+      branch,
+      mode: "ingest"
+    });
+
+    const data = await executeGraphQL(SUBMIT_JOB_MUTATION, {
+      jobType: "INGEST_CHUNK",
+      payload,
+      auditId
+    });
+    
+    chunkJobIds.push(data.submitJob.jobId);
+  }
+
+  logger.info(`Submitted ${chunkJobIds.length} ingest jobs to background queue. Polling for completion...`);
+  await pollForMultipleJobs(chunkJobIds);
+
+  return `Successfully ingested ${chunks.length} chunks from ${directory_path} into expert memory.`;
+}
+
+async function pollForJob(jobId: string): Promise<string> {
+    const maxAttempts = 180; // 15 minutes max
+    let attempts = 0;
+
+    while (attempts < maxAttempts) {
+        const data = await executeGraphQL(GET_JOB_STATUS_QUERY, { jobId });
+        const job = data.getJobStatus;
+        if (job) {
+            if (job.status === "COMPLETED") return job.result || "Success";
+            if (job.status === "FAILED") throw new Error(`Job ${jobId} failed: ${job.result}`);
+        }
+        attempts++;
+        await new Promise(resolve => setTimeout(resolve, 5000));
+    }
+    throw new Error(`Job ${jobId} timed out after 15 minutes.`);
+}
+
+async function pollForMultipleJobs(jobIds: string[]): Promise<string[]> {
+    const pendingJobs = new Set(jobIds);
+    const completedResults: string[] = [];
+    const maxAttempts = 180;
+    let attempts = 0;
+
+    while (pendingJobs.size > 0 && attempts < maxAttempts) {
+        for (const jobId of Array.from(pendingJobs)) {
+            const data = await executeGraphQL(GET_JOB_STATUS_QUERY, { jobId });
+            const job = data.getJobStatus;
+            if (job) {
+                if (job.status === "COMPLETED") {
+                    pendingJobs.delete(jobId);
+                    if (job.result) completedResults.push(job.result);
+                    logger.info(`Chunk Job ${jobId} completed. ${pendingJobs.size} remaining.`);
+                } else if (job.status === "FAILED") {
+                    throw new Error(`Chunk Job ${jobId} failed: ${job.result}`);
+                }
+            }
+        }
+        if (pendingJobs.size > 0) {
+            attempts++;
+            await new Promise(resolve => setTimeout(resolve, 5000));
+        }
+    }
+    
+    if (pendingJobs.size > 0) {
+        throw new Error(`Wait for multiple jobs timed out. ${pendingJobs.size} jobs still pending.`);
+    }
+
+    return completedResults;
+}
+
 async function pollForResults(expertEmail: string, auditId: string): Promise<string> {
-    const maxAttempts = 60; // 5 minutes
+    const maxAttempts = 120; // 10 minutes
     let attempts = 0;
 
     while (attempts < maxAttempts) {
@@ -150,9 +275,6 @@ async function pollForResults(expertEmail: string, auditId: string): Promise<str
         }
         attempts++;
         await new Promise(resolve => setTimeout(resolve, 5000));
-        if (attempts % 6 === 0) {
-            logger.info(`Analysis in progress... ${Math.min(Math.round((attempts / maxAttempts) * 100), 99)}% (${attempts * 5}s elapsed)`);
-        }
     }
-    throw new Error("Audit synthesis timed out. Please check the dashboard later.");
+    throw new Error("Audit synthesis timed out fetching final S3 URL.");
 }
