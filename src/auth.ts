@@ -59,6 +59,10 @@ async function login() {
 }
 
 export function getAccessToken(): string | null {
+  if (process.env.GAIIA_ACCESS_TOKEN) {
+    return process.env.GAIIA_ACCESS_TOKEN;
+  }
+
   if (!fs.existsSync(AUTH_FILE)) return null;
   
   try {
