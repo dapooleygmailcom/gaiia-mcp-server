@@ -45,6 +45,63 @@ function generateJsonSchema(obj: any, key?: string): any {
   }
 }
 
+export function generateMcpToolMetadata(
+  method: string,
+  urlStr: string,
+  requestPayload: any,
+  responsePayload: any,
+  contentType: string
+) {
+  const url = new URL(urlStr);
+  const normalizedPath = url.pathname.replace(/\/\d+(?=\/|$)/g, '/{id}');
+  const normalizedUrl = urlStr.replace(url.pathname, normalizedPath);
+  const pathName = normalizedPath;
+  const host = url.host;
+
+  let rpcMethod = '';
+  if (contentType.includes('json') && typeof requestPayload === 'object' && requestPayload?.jsonrpc && requestPayload?.method) {
+    rpcMethod = requestPayload.method;
+  } else if (contentType.includes('xml') && typeof requestPayload === 'string' && requestPayload.includes('<methodName>')) {
+    const match = requestPayload.match(/<methodName>(.*?)<\/methodName>/);
+    if (match && match[1]) rpcMethod = match[1];
+  }
+
+  const baseToolName = `${method.toLowerCase()}_${pathName.replace(/[^a-zA-Z0-9]/g, '_').replace(/^_+|_+$/g, '')}`;
+  const toolName = rpcMethod ? `${baseToolName}_${rpcMethod.replace(/[^a-zA-Z0-9]/g, '_')}` : baseToolName;
+
+  const description = rpcMethod 
+    ? `Performs a ${method} request to invoke the ${rpcMethod} RPC method on ${normalizedUrl}.` 
+    : `Performs a ${method} request against the ${pathName} resource at ${normalizedUrl}.`;
+
+  const KNOWN_SYSTEMS: Record<string, string> = {
+    'xero.com': 'Xero Accounting',
+    'salesforce.com': 'Salesforce CRM',
+    'service-now.com': 'ServiceNow',
+    'workday.com': 'Workday HCM',
+    'stripe.com': 'Stripe',
+    'zendesk.com': 'Zendesk',
+    'bamboohr.com': 'BambooHR',
+  };
+  const matchedDomain = Object.keys(KNOWN_SYSTEMS).find(domain => host.includes(domain));
+  const businessSystem = matchedDomain ? KNOWN_SYSTEMS[matchedDomain] : 'Unknown';
+
+  const pathSegments = pathName.split('/').filter(s => s && !/^\d+$/.test(s) && !/^{id}$/.test(s) && !['v1', 'v2', 'api'].includes(s));
+  
+  const fieldKeywords = new Set<string>();
+  if (responsePayload && typeof responsePayload === 'object' && !Array.isArray(responsePayload)) {
+    Object.keys(responsePayload).forEach(k => fieldKeywords.add(k.replace(/_/g, ' ')));
+  }
+
+  const keywords = Array.from(new Set([...pathSegments, ...fieldKeywords, method.toLowerCase()]));
+
+  return {
+    name: toolName,
+    description,
+    businessSystem,
+    keywords
+  };
+}
+
 export async function synthesizeArtifacts(
   method: string,
   urlStr: string,
@@ -105,24 +162,16 @@ export async function synthesizeArtifacts(
     }
   };
 
-  // 3. MCP Tool Definition
-  let rpcMethod = '';
-  if (contentType.includes('json') && typeof requestPayload === 'object' && requestPayload.jsonrpc && requestPayload.method) {
-    rpcMethod = requestPayload.method;
-  } else if (contentType.includes('xml') && typeof requestPayload === 'string' && requestPayload.includes('<methodName>')) {
-    const match = requestPayload.match(/<methodName>(.*?)<\/methodName>/);
-    if (match && match[1]) rpcMethod = match[1];
-  }
+  const metadata = generateMcpToolMetadata(method, urlStr, requestPayload, responsePayload, contentType);
 
-  const baseToolName = `${method.toLowerCase()}_${pathName.replace(/[^a-zA-Z0-9]/g, '_').replace(/^_+|_+$/g, '')}`;
-  const toolName = rpcMethod ? `${baseToolName}_${rpcMethod.replace(/[^a-zA-Z0-9]/g, '_')}` : baseToolName;
+  // 3. MCP Tool Definition
   const mcpTool = {
-    name: toolName,
-    description: rpcMethod ? `Calls the ${rpcMethod} RPC method on ${normalizedUrl}.` : `Calls the ${method} ${normalizedUrl} endpoint.`,
+    ...metadata,
     inputSchema: reqSchema
   };
 
   // 4. A2A Card (Markdown)
+  const rpcMethod = (contentType.includes('json') && typeof requestPayload === 'object' && requestPayload?.jsonrpc && requestPayload?.method) ? requestPayload.method : '';
   const a2aCard = `
 # A2A Integration Card: ${host}${pathName}${rpcMethod ? ` (${rpcMethod})` : ''}
 
