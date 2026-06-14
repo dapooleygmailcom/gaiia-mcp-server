@@ -58,7 +58,7 @@ async function login() {
   }
 }
 
-export function getAccessToken(): string | null {
+export async function getAccessToken(): Promise<string | null> {
   if (process.env.GAIIA_ACCESS_TOKEN) {
     return process.env.GAIIA_ACCESS_TOKEN;
   }
@@ -67,12 +67,41 @@ export function getAccessToken(): string | null {
   
   try {
     const authData = JSON.parse(fs.readFileSync(AUTH_FILE, "utf-8"));
+    
+    // Check if expired
     if (Date.now() > authData.expiresAt) {
-      console.warn("[WARN] GAIIA Access Token has expired. Please run 'npm run login' again.");
-      return null;
+      if (!authData.refreshToken) {
+        console.warn("[WARN] GAIIA Access Token expired and no refresh token found. Please run 'npm run login'.");
+        return null;
+      }
+      
+      console.log("[Auth] Access token expired. Refreshing token transparently...");
+      const command = new InitiateAuthCommand({
+        AuthFlow: "REFRESH_TOKEN_AUTH",
+        ClientId: CLIENT_ID,
+        AuthParameters: {
+          REFRESH_TOKEN: authData.refreshToken,
+        },
+      });
+      
+      const response = await client.send(command);
+      if (response.AuthenticationResult && response.AuthenticationResult.AccessToken) {
+        const newAuthData = {
+          ...authData,
+          accessToken: response.AuthenticationResult.AccessToken,
+          expiresAt: Date.now() + (response.AuthenticationResult.ExpiresIn || 3600) * 1000,
+        };
+        fs.writeFileSync(AUTH_FILE, JSON.stringify(newAuthData, null, 2));
+        return newAuthData.accessToken;
+      } else {
+        console.warn("[WARN] Failed to refresh token. Please run 'npm run login' again.");
+        return null;
+      }
     }
+    
     return authData.accessToken;
-  } catch {
+  } catch (error: any) {
+    console.error("[ERROR] Failed during transparent token refresh:", error.message);
     return null;
   }
 }
