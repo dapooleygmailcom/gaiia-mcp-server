@@ -50,7 +50,8 @@ export function generateMcpToolMetadata(
   urlStr: string,
   requestPayload: any,
   responsePayload: any,
-  contentType: string
+  contentType: string,
+  errorHints: string[] = []
 ) {
   const url = new URL(urlStr);
   const normalizedPath = url.pathname.replace(/\/\d+(?=\/|$)/g, '/{id}');
@@ -73,17 +74,16 @@ export function generateMcpToolMetadata(
     ? `Performs a ${method} request to invoke the ${rpcMethod} RPC method on ${normalizedUrl}.` 
     : `Performs a ${method} request against the ${pathName} resource at ${normalizedUrl}.`;
 
-  const KNOWN_SYSTEMS: Record<string, string> = {
-    'xero.com': 'Xero Accounting',
-    'salesforce.com': 'Salesforce CRM',
-    'service-now.com': 'ServiceNow',
-    'workday.com': 'Workday HCM',
-    'stripe.com': 'Stripe',
-    'zendesk.com': 'Zendesk',
-    'bamboohr.com': 'BambooHR',
-  };
-  const matchedDomain = Object.keys(KNOWN_SYSTEMS).find(domain => host.includes(domain));
-  const businessSystem = matchedDomain ? KNOWN_SYSTEMS[matchedDomain] : 'Unknown';
+  const isIp = /^(\d{1,3}\.){3}\d{1,3}(:\d+)?$/.test(host);
+  let businessSystem = 'Internal Service';
+  if (!isIp) {
+    const cleanHost = host.replace(/^(api|www|app|dev|sandbox)\./i, '');
+    const hostParts = cleanHost.split('.').filter(p => p.length > 2 && !['com', 'org', 'net', 'io', 'co', 'local'].includes(p));
+    const formattedParts = hostParts.map(p => p.charAt(0).toUpperCase() + p.slice(1)).join('-');
+    if (formattedParts) {
+      businessSystem = `${formattedParts} API`;
+    }
+  }
 
   const pathSegments = pathName.split('/').filter(s => s && !/^\d+$/.test(s) && !/^{id}$/.test(s) && !['v1', 'v2', 'api'].includes(s));
   
@@ -91,8 +91,11 @@ export function generateMcpToolMetadata(
   if (responsePayload && typeof responsePayload === 'object' && !Array.isArray(responsePayload)) {
     Object.keys(responsePayload).forEach(k => fieldKeywords.add(k.replace(/_/g, ' ')));
   }
+  if (requestPayload && typeof requestPayload === 'object' && !Array.isArray(requestPayload)) {
+    Object.keys(requestPayload).forEach(k => fieldKeywords.add(k.replace(/_/g, ' ')));
+  }
 
-  const keywords = Array.from(new Set([...pathSegments, ...fieldKeywords, method.toLowerCase()]));
+  const keywords = Array.from(new Set([...pathSegments, ...fieldKeywords, ...errorHints, method.toLowerCase()]));
 
   return {
     name: toolName,
@@ -107,7 +110,8 @@ export async function synthesizeArtifacts(
   urlStr: string,
   requestPayload: any,
   responsePayload: any,
-  contentType: string = 'application/json'
+  contentType: string = 'application/json',
+  errorHints: string[] = []
 ) {
   const url = new URL(urlStr);
   
@@ -162,7 +166,7 @@ export async function synthesizeArtifacts(
     }
   };
 
-  const metadata = generateMcpToolMetadata(method, urlStr, requestPayload, responsePayload, contentType);
+  const metadata = generateMcpToolMetadata(method, urlStr, requestPayload, responsePayload, contentType, errorHints);
 
   // 3. MCP Tool Definition
   const mcpTool = {

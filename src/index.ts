@@ -138,6 +138,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
+  const meta: any = request.meta || {};
+  const traceId = meta.traceId || (args as any)?._traceId;
+  
+  logger.info(`Handling tool call: ${name}`, { traceId, component: 'MCPServer' });
 
   try {
     switch (name) {
@@ -198,6 +202,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         throw new Error("Unknown tool");
     }
   } catch (error: any) {
+    logger.error(`Error executing tool ${name}: ${error.message}`, { traceId, component: 'MCPServer' });
     return {
       content: [{ type: "text", text: `Error: ${error.message}` }],
       isError: true,

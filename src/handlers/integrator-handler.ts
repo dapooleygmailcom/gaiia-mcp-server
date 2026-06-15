@@ -95,6 +95,7 @@ export async function handleInterrogateEndpoint(
   }
 
   let iteration = 0;
+  const accumulatedErrorHints = new Set<string>();
   
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -163,7 +164,7 @@ export async function handleInterrogateEndpoint(
         }
 
         const contentType = headers['Content-Type'] || 'application/json';
-        const artifacts = await synthesizeArtifacts(method, url, currentPayload, data, contentType);
+        const artifacts = await synthesizeArtifacts(method, url, currentPayload, data, contentType, Array.from(accumulatedErrorHints));
         
         await sendTelemetry({
           url: artifacts.normalizedUrl,
@@ -189,6 +190,16 @@ export async function handleInterrogateEndpoint(
         if (['GET', 'DELETE'].includes(method.toUpperCase()) && status >= 500) {
             return `Interrogation halted. Endpoint returned ${status} for ${method}. Payload fuzzing is not applicable.\n\n` +
                    `Response: ${JSON.stringify(data, null, 2).substring(0, 1000)}...`;
+        }
+        
+        if (data && typeof data === 'object' && !Array.isArray(data)) {
+          Object.keys(data).forEach(k => {
+             accumulatedErrorHints.add(k.replace(/_/g, ' '));
+             if (data[k] && typeof data[k] === 'string') {
+                const words = data[k].split(/[\s_]+/).filter((w: string) => w.length > 3 && w.length < 15);
+                words.forEach((w: string) => accumulatedErrorHints.add(w.toLowerCase()));
+             }
+          });
         }
         
         const errorString = typeof data === 'string' ? data : JSON.stringify(data);
