@@ -1,158 +1,120 @@
-# GAIIA Expert Proxy (MCP Server)
+# GAIIA Unified MCP Server (v2.0.0)
 
-GAIIA Expert MCP Server is a Model Context Protocol (MCP) server that enables high-fidelity code audits, refactors, and architectural analysis using specialized Proxy Experts in conjunction with a remote LLM.
+The **GAIIA Unified MCP Server** is an enterprise-grade Model Context Protocol (MCP) server that connects AI coding assistants and autonomous agents to the GAIIA ecosystem. It enables expert-guided code audits, project transformations, BPMN process triggering, and multi-protocol API interrogation.
 
-## Features
+---
 
-- **Expert Selection**: List and choose from a registry of Proxy Experts with different specialties (e.g., security, performance, architecture).
-- **Code Transformation**: Send code blocks to experts for auditing or refactoring based on their specific manifests.
-- **Project Analysis**: Perform deep architectural audits, automated repository-wide refactors, and vector ingestions on local directories. *(Note: Large audits and refactors run asynchronously in the cloud.)*
-- **API Interrogation**: Intelligently fuzz and discover schemas for unknown API endpoints using reinforcement learning.
-- **Workflow Execution**: Trigger and list BPMN business process workflows registered in the GAIIA ecosystem.
-- **Authentication**: Users must authenticate with their GAIIA account to access the expert registry and processing tasks.
+## 🌟 Capabilities & Features
 
-## Installation
+- **Expert Selection & Manifest Routing**: Browse and select from a registry of Proxy Experts (e.g. Clean Architecture, Security, Performance, Transit domain).
+- **Code Transformation & Auditing**: Transform individual code blocks or conduct repository-wide audits against immutable architectural standards.
+- **Multi-Protocol API Interrogation**: Fuzz and discover schemas across diverse protocols:
+  - **REST (JSON)**: OpenAPI v3 synthesis.
+  - **GraphQL**: Schema introspection and automatic tool generation.
+  - **gRPC (Protobuf)**: Server reflection inspection (`src/mock/mock-grpc-server.ts`).
+  - **ISO 8583 (TCP Sockets)**: Raw socket communication for payment gateways (`src/mock/mock-tcp-server.ts`).
+  - **XML / SOAP**: Automatic `.xsd` and `.wsdl` parsing.
+  - **EDI (ANSI X12)**: Segment repair for legacy enterprise supply chain formats.
+  - **OData & ERP**: Enterprise metadata resolution (`src/mock/mock-erp-server.ts`).
+- **BPMS Process Orchestration**: List BPMN blueprints and trigger workflow executions in [gaiia-process-management](file:///c:/programming/aiia/gaiia-process-management).
+- **Telemetry & Context Retention**: In-memory context tracking and telemetry logging via `src/services/telemetry-service.ts`.
+
+---
+
+## ⚙️ Installation & Build
 
 ### Prerequisites
+- **Node.js**: v20+ LTS
+- **npm**: v9+
+- A registered GAIIA account for cloud registry sync
 
-- [Node.js](https://nodejs.org/) (v20 or higher)
-- [npm](https://www.npmjs.com/)
-- An GAIIA account (sign up at https://gaiia.dev)
+### Setup
+```bash
+# 1. Navigate to directory
+cd gaiia-mcp-server
 
-### Steps
+# 2. Install dependencies
+npm install
 
-1. **Clone or copy** this directory to your machine.
-2. **Install dependencies**:
-   ```bash
-   npm install
-   ```
-3. **Build the project**:
-   ```bash
-   npm run build
-   ```
+# 3. Build TypeScript
+npm run build
+```
 
-## Configuration
+---
 
-### Authentication
+## 🔐 Authentication
 
-Run the following command to log in and cache your authentication tokens:
+Authenticate with the GAIIA platform to cache session tokens locally:
 
 ```bash
 npm run login
 ```
 
-Follow the prompts to enter your credentials. This will store the session in a local `~/.gaiia/auth.json` file. If you do not have credentials sign up at https://gaiia.dev.
+Tokens are cached securely at `~/.gaiia/auth.json`.
 
-> [!CAUTION]
-> The `auth.json` file stores your session tokens in plain text. Ensure this file is kept secure and never committed to version control.
+---
 
-## Usage with MCP Clients (e.g., Claude Desktop)
+## 🔧 Environment Configuration (.env)
 
-Add the following to your MCP settings configuration:
+```env
+GAIIA_GRAPHQL_ENDPOINT=https://<api-id>.appsync-api.ap-southeast-2.amazonaws.com/graphql
+AWS_REGION=ap-southeast-2
+USER_POOL_ID=ap-southeast-2_xxxxxxxxx
+APP_CLIENT_ID=xxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+---
+
+## 🔌 MCP Client Configuration (e.g., Claude Desktop)
+
+Add the server to your `claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
-    "gaiia-logic-proxy": {
+    "gaiia-unified-mcp": {
       "command": "node",
-      "args": ["c:/path/to/gaiia-mcp-server/build/index.js"]
+      "args": ["c:/programming/aiia/gaiia-mcp-server/build/index.js"]
     }
   }
 }
 ```
 
-## Available Tools
+---
 
-### `gaiia_list_experts`
+## 🛠️ Available MCP Tools Reference
 
-Lists all available AI experts in the GAIIA registry.
+| Tool Name | Purpose | Key Arguments |
+|---|---|---|
+| `gaiia_list_experts` | Lists all available AI experts in the registry | `query` (optional string: name, email, or architecture keywords) |
+| `gaiia_set_active_expert` | Sets the active expert for transformations | `email` (required string) |
+| `gaiia_transform` | Audits, refactors, or generates code with the active expert | `code` (string), `instructions` (string) |
+| `gaiia_analyze_project` | Performs deep architectural audit or automated refactor on a directory | `directory_path` (string), `mode` ("audit" \| "refactor") |
+| `gaiia_ingest_project` | Ingests directory code samples into active expert memory | `directory_path` (string) |
+| `interrogate_endpoint` | Multi-protocol API fuzzing and schema synthesis | `url` (string), `method` (string), `auth_header` (optional), `base_payload` (optional) |
+| `sync_specs` | Synchronizes locally discovered schemas in `specs/` to cloud registry | *None* |
+| `gaiia_list_processes` | Lists registered BPMN templates in the workspace | *None* |
+| `gaiia_start_process` | Triggers a BPMN workflow run with initial context | `process_type` (string), `payload` (optional object) |
 
-- **Args**: `query` (optional string) - Search for experts by their email address, name, or specific architectural styles/keywords (e.g., 'Clean Architecture', 'Node.js', 'CQRS').
+---
 
-### `sync_specs`
+## 🧪 Local Testing & Multi-Protocol Mock Servers
 
-Synchronizes all locally fuzzed and discovered API specifications in the `specs/` directory back to the cloud GAIIA Registry.
+The server includes standalone mock servers in `src/mock/` for testing complex protocols without external dependencies:
 
-*Note: The `specs/` directory contains schemas auto-generated by the `interrogate_endpoint` tool.*
+```bash
+# Start mock gRPC server
+npx tsx src/mock/mock-grpc-server.ts
 
-- **Args**: None
+# Start mock ISO 8583 TCP socket server
+npx tsx src/mock/mock-tcp-server.ts
 
-### `gaiia_set_active_expert`
+# Start mock ERP / OData server
+npx tsx src/mock/mock-erp-server.ts
+```
 
-Sets the expert to be used for subsequent code transformations.
+---
 
-- **Args**: `email` (required string) - The email address of the expert proxy.
+## 📄 License
 
-### `gaiia_transform`
-
-Processes a single block of code with the active expert.
-
-- **Args**: 
-  - `code` (required string) - The source code block to process.
-  - `instructions` (required string) - Specific refactoring, audit, or generation instructions.
-
-### `gaiia_analyze_project`
-
-Audits or refactors an entire local directory.
-
-> [!WARNING]
-> Running this tool in `refactor` mode will silently overwrite your local files. Ensure your working directory is clean and fully committed to version control (e.g., Git) before proceeding.
-
-- **Args**: 
-  - `directory_path` (required string) - Absolute path to the local project folder.
-  - `mode` (optional string) - "audit" or "refactor". Default is "audit".
-
-### `gaiia_ingest_project`
-
-Scans a local project directory and ingests its code samples into the active expert's memory for context retention.
-
-- **Args**: 
-  - `directory_path` (required string) - Absolute path to the project directory.
-
-### `interrogate_endpoint`
-
-Intelligently interrogates APIs to discover schemas and generate A2A/MCP tools via reinforcement learning fuzzing.
-
-> [!CAUTION]
-> This tool performs active fuzzing. Do **not** run this against production environments unless authorized, as it may cause unintended data mutations or Denial of Service (DoS).
-
-- **Args**: 
-  - `url` (required string) - The full API URL (supports `http://`, `https://`, `grpc://`, or `tcp://` for sockets).
-  - `method` (required string) - HTTP Method: `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `GRAPHQL`, or `AUTO`.
-  - `auth_header` (optional string) - Optional authentication header (e.g., `Bearer token`).
-  - `base_payload` (optional object) - Starting template payload to fuzz.
-  - `extra_headers` (optional object) - Map of custom headers.
-
-#### Supported Protocols
-
-1. **REST (JSON)**: Fully supported with automatic OpenAPI synthesis.
-2. **GraphQL**: Auto-detected and introspected. Converts the GraphQL schema into standard MCP Tools.
-3. **XML/SOAP**: Auto-fetches `.xsd` or `.wsdl` from error messages and uses them as LLM hints.
-4. **gRPC (Protobuf)**: Requires `grpc://` URL. **Constraint**: Server _must_ have `grpc.reflection.v1alpha.ServerReflection` enabled or the `.proto` schema must be provided. Fuzzing raw binary protobuf without field indexes is computationally impractical.
-5. **OData**: Auto-fetches the Entity Data Model from `/$metadata`.
-6. **Bulk CSV (ERP)**: Handles `text/csv` requirements natively.
-7. **EDI (ANSI X12)**: Handles raw text `application/edi-x12` by iteratively guessing missing segments (e.g. ISA, GS, ST) from clear-text errors.
-8. **JSON-RPC / XML-RPC**: Iteratively builds valid RPC envelopes and dynamically extracts the inner method for specific tool naming.
-9. **ISO 8583 (TCP Sockets)**: Requires `tcp://` URL. Bypasses HTTP entirely to establish raw socket connections for payment gateway fuzzing.
-
-### `gaiia_list_processes`
-
-List all registered BPMN process blueprints/templates in the GAIIA registry for the authenticated workspace.
-
-- **Args**: None
-
-### `gaiia_start_process`
-
-Starts/triggers an active execution instance of a registered BPMN process blueprint in the cloud with an initial business payload context.
-
-- **Args**: 
-  - `process_type` (required string) - The unique processType/slug of the BPMN template (e.g. `employee-onboarding` or `pax-terminal-procurement`).
-  - `payload` (optional object) - Initial custom JSON payload context for the process run.
-
-## Testing
-
-Currently, this repository does not include an automated test suite. Contributors should manually verify changes using an MCP client (e.g., Claude Desktop) before submitting pull requests.
-
-## License
-
-MIT
+MIT © 2026 GAIIA Engineering
